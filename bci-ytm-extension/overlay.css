@@ -1,0 +1,202 @@
+/* ── BCI Overlay 樣式 ─────────────────────────────────────── */
+
+#bci-overlay {
+  position: fixed;
+  right: 20px;
+  bottom: 100px;            /* 避開 YT Music 底部播放列 */
+  width: 280px;
+  background: rgba(20, 20, 20, 0.92);
+  color: #fff;
+  font-family: 'Roboto', -apple-system, sans-serif;
+  font-size: 13px;
+  padding: 14px;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  z-index: 99999;
+  user-select: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: opacity 0.2s;
+}
+
+#bci-overlay.bci-paused {
+  opacity: 0.45;
+}
+
+#bci-overlay header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+#bci-overlay .bci-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: normal;
+  text-transform: none;
+  font-size: 11px;
+  color: #bbb;
+}
+
+#bci-overlay .bci-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #777;
+  box-shadow: 0 0 4px currentColor;
+}
+#bci-overlay .bci-led.bci-on  { background: #1ed760; color: #1ed760; }
+#bci-overlay .bci-led.bci-off { background: #e5484d; color: #e5484d; }
+
+/* ── 機率條 ──────────────────────────────────────────────── */
+#bci-overlay .bci-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+#bci-overlay .bci-bar-label {
+  width: 50px;
+  font-size: 11px;
+  color: #ccc;
+}
+#bci-overlay .bci-bar-track {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+#bci-overlay .bci-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 4px;
+  transition: width 0.2s ease-out;
+}
+#bci-overlay .bci-bar-fill.bci-relax { background: linear-gradient(90deg, #4a90e2, #5fa8ff); }
+#bci-overlay .bci-bar-fill.bci-focus { background: linear-gradient(90deg, #f5a623, #ffc857); }
+#bci-overlay .bci-bar-fill.bci-blink { background: linear-gradient(90deg, #e5484d, #ff7070); }
+
+#bci-overlay .bci-bar-pct {
+  width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: #aaa;
+}
+
+/* ── 眨眼事件計數 ─────────────────────────────────────────── */
+#bci-overlay .bci-blink-counter {
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+}
+#bci-overlay .bci-blink-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+#bci-overlay .bci-blink-counter .bci-label {
+  font-size: 11px;
+  color: #ccc;
+  font-weight: 600;
+}
+#bci-overlay .bci-blink-status {
+  font-size: 11px;
+  color: #888;
+  font-weight: 500;
+}
+#bci-overlay .bci-blink-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+}
+#bci-overlay .bci-blink-dot {
+  flex: 1;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+#bci-overlay .bci-blink-dot .bci-dot-tip {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+#bci-overlay .bci-blink-dot.bci-warn {
+  background: rgba(245, 166, 35, 0.25);
+  border-color: #f5a623;
+}
+#bci-overlay .bci-blink-dot.bci-warn .bci-dot-tip {
+  color: #f5a623;
+}
+#bci-overlay .bci-blink-dot.bci-good {
+  background: rgba(30, 215, 96, 0.25);
+  border-color: #1ed760;
+  box-shadow: 0 0 8px rgba(30, 215, 96, 0.4);
+}
+#bci-overlay .bci-blink-dot.bci-good .bci-dot-tip {
+  color: #1ed760;
+}
+
+/* ── 最近觸發紀錄 ─────────────────────────────────────────── */
+#bci-overlay .bci-events {
+  margin-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+  min-height: 18px;
+}
+#bci-overlay .bci-event {
+  font-size: 11px;
+  color: #aaa;
+  padding: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+#bci-overlay .bci-event .bci-action {
+  color: #1ed760;
+  font-weight: 600;
+  margin-left: 4px;
+}
+#bci-overlay .bci-event .bci-count {
+  color: #888;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+/* ── Toast ───────────────────────────────────────────────── */
+#bci-toast {
+  position: fixed;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 215, 96, 0.95);
+  color: #000;
+  font-weight: 600;
+  padding: 10px 24px;
+  border-radius: 24px;
+  font-size: 14px;
+  z-index: 100000;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.25s, transform 0.25s;
+  pointer-events: none;
+}
+#bci-toast.bci-show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-8px);
+}

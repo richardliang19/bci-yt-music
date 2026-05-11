@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>BCI YT Music Controller — GUI 預覽</title>
+<style>
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Roboto', -apple-system, "Segoe UI", sans-serif;
+    /* 模擬 YT Music 深色背景 */
+    background: linear-gradient(180deg, #1a1a1a 0%, #0a0a0a 100%);
+    min-height: 100vh;
+    color: #fff;
+    overflow-x: hidden;
+  }
+
+  /* 模擬 YT Music 頁面骨架 */
+  .yt-mock {
+    padding: 24px 48px;
+  }
+  .yt-mock h1 {
+    color: #ff6f6f;
+    font-size: 20px;
+    margin: 0 0 8px;
+    letter-spacing: 0.5px;
+  }
+  .yt-mock .nav { color: #777; font-size: 13px; margin-bottom: 32px; }
+  .yt-mock .album-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 24px;
+    margin-bottom: 40px;
+  }
+  .album {
+    background: #181818;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .album .cover {
+    aspect-ratio: 1;
+    background: linear-gradient(135deg, #2a2a2a, #444);
+    border-radius: 6px;
+    margin-bottom: 12px;
+  }
+  .album .title { font-size: 14px; font-weight: 600; }
+  .album .artist { font-size: 12px; color: #888; margin-top: 4px; }
+
+  /* 模擬底部播放列 */
+  .player-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 72px;
+    background: #212121;
+    border-top: 1px solid #333;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 16px;
+    z-index: 1;
+  }
+  .player-bar .now-cover {
+    width: 56px; height: 56px;
+    background: linear-gradient(135deg, #ff6f6f, #f5a623);
+    border-radius: 4px;
+  }
+  .player-bar .now-info { flex: 1; }
+  .player-bar .now-info .t { font-size: 14px; }
+  .player-bar .now-info .a { font-size: 12px; color: #888; }
+  .player-bar .controls { display: flex; gap: 12px; align-items: center; }
+  .player-bar .ctrl {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: #333;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .player-bar .ctrl.play { background: #fff; color: #000; }
+
+  .preview-label {
+    position: fixed;
+    top: 16px; left: 16px;
+    background: rgba(30,215,96,0.18);
+    border: 1px solid #1ed760;
+    color: #1ed760;
+    padding: 6px 14px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 600;
+    z-index: 99998;
+  }
+
+  /* === 從 bci-ytm-extension/overlay.css 複製的樣式 === */
+  #bci-overlay {
+    position: fixed;
+    right: 20px;
+    bottom: 100px;
+    width: 280px;
+    background: rgba(20, 20, 20, 0.92);
+    color: #fff;
+    font-family: 'Roboto', -apple-system, sans-serif;
+    font-size: 13px;
+    padding: 14px;
+    border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    z-index: 99999;
+    user-select: none;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  #bci-overlay header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px; font-weight: 600; font-size: 12px;
+    letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  #bci-overlay .bci-status {
+    display: flex; align-items: center; gap: 6px;
+    font-weight: normal; text-transform: none; font-size: 11px; color: #bbb;
+  }
+  #bci-overlay .bci-led {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #1ed760; box-shadow: 0 0 4px #1ed760;
+  }
+  #bci-overlay .bci-bar-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  }
+  #bci-overlay .bci-bar-label { width: 50px; font-size: 11px; color: #ccc; }
+  #bci-overlay .bci-bar-track {
+    flex: 1; height: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px; overflow: hidden;
+  }
+  #bci-overlay .bci-bar-fill {
+    height: 100%; border-radius: 4px;
+    transition: width 0.2s ease-out;
+  }
+  #bci-overlay .bci-bar-fill.bci-relax { background: linear-gradient(90deg, #4a90e2, #5fa8ff); }
+  #bci-overlay .bci-bar-fill.bci-focus { background: linear-gradient(90deg, #f5a623, #ffc857); }
+  #bci-overlay .bci-bar-fill.bci-blink { background: linear-gradient(90deg, #e5484d, #ff7070); }
+  #bci-overlay .bci-bar-pct {
+    width: 36px; text-align: right;
+    font-variant-numeric: tabular-nums; font-size: 11px; color: #aaa;
+  }
+  #bci-overlay .bci-blink-counter {
+    margin-top: 12px; padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  #bci-overlay .bci-blink-counter .bci-label { font-size: 11px; color: #ccc; }
+  #bci-overlay .bci-blink-dots { display: flex; gap: 4px; }
+  #bci-overlay .bci-blink-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+  }
+  #bci-overlay .bci-blink-dot.bci-on {
+    background: #e5484d; box-shadow: 0 0 6px #e5484d;
+  }
+  #bci-overlay .bci-events {
+    margin-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding-top: 8px;
+  }
+  #bci-overlay .bci-event {
+    font-size: 11px; color: #aaa; padding: 2px 0;
+    font-variant-numeric: tabular-nums;
+  }
+  #bci-overlay .bci-event .bci-action {
+    color: #1ed760; font-weight: 600; margin-left: 4px;
+  }
+
+  /* Toast */
+  #bci-toast {
+    position: fixed;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    background: rgba(30, 215, 96, 0.95);
+    color: #000;
+    font-weight: 600;
+    padding: 10px 24px;
+    border-radius: 24px;
+    font-size: 14px;
+    z-index: 100000;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  }
+
+  /* 控制面板（切換預覽情境）*/
+  .scenario-picker {
+    position: fixed;
+    bottom: 96px;
+    left: 16px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px 14px;
+    z-index: 99998;
+    font-size: 12px;
+  }
+  .scenario-picker label { color: #aaa; margin-right: 8px; }
+  .scenario-picker button {
+    background: #2a2a2a; color: #fff;
+    border: 1px solid #444; padding: 4px 10px;
+    border-radius: 4px; cursor: pointer;
+    margin-right: 4px; font-size: 12px;
+  }
+  .scenario-picker button.active {
+    background: #1ed760; color: #000; border-color: #1ed760;
+  }
+</style>
+</head>
+<body>
+
+<div class="preview-label">📸 GUI 預覽（不需要 server，給截圖用）</div>
+
+<!-- 模擬 YT Music 頁面 -->
+<div class="yt-mock">
+  <div class="nav">YouTube Music › 首頁</div>
+  <h1>🎵 你今天的推薦</h1>
+  <div class="album-row">
+    <div class="album"><div class="cover"></div><div class="title">Lo-Fi Beats</div><div class="artist">Various Artists</div></div>
+    <div class="album"><div class="cover"></div><div class="title">Focus Flow</div><div class="artist">Concentration Mix</div></div>
+    <div class="album"><div class="cover"></div><div class="title">Chill Vibes</div><div class="artist">Relax Mode</div></div>
+    <div class="album"><div class="cover"></div><div class="title">Study Session</div><div class="artist">Brain Boost</div></div>
+    <div class="album"><div class="cover"></div><div class="title">Coffee Shop</div><div class="artist">Ambient</div></div>
+    <div class="album"><div class="cover"></div><div class="title">Late Night</div><div class="artist">Jazz Lounge</div></div>
+  </div>
+</div>
+
+<!-- 場景切換 -->
+<div class="scenario-picker">
+  <label>預覽情境：</label>
+  <button data-s="focus" class="active">Focus 主導</button>
+  <button data-s="blink1">1 次眨眼</button>
+  <button data-s="blink2">2 次眨眼</button>
+  <button data-s="blink3">3 次眨眼</button>
+  <button data-s="relax">Relax 主導</button>
+</div>
+
+<!-- 模擬底部播放列 -->
+<div class="player-bar">
+  <div class="now-cover"></div>
+  <div class="now-info">
+    <div class="t">Lo-Fi Study Session</div>
+    <div class="a">ChillVibes · Album</div>
+  </div>
+  <div class="controls">
+    <div class="ctrl">⏮</div>
+    <div class="ctrl play">▶</div>
+    <div class="ctrl">⏭</div>
+  </div>
+</div>
+
+<!-- 真正的 BCI Overlay -->
+<div id="bci-overlay">
+  <header>
+    <span>BCI Controller</span>
+    <span class="bci-status">
+      <span class="bci-led"></span>
+      <span class="bci-status-text">推論中</span>
+    </span>
+  </header>
+
+  <div class="bci-bar-row">
+    <span class="bci-bar-label">Relax</span>
+    <div class="bci-bar-track"><div class="bci-bar-fill bci-relax" id="bar-r"></div></div>
+    <span class="bci-bar-pct" id="pct-r">0%</span>
+  </div>
+  <div class="bci-bar-row">
+    <span class="bci-bar-label">Focus</span>
+    <div class="bci-bar-track"><div class="bci-bar-fill bci-focus" id="bar-f"></div></div>
+    <span class="bci-bar-pct" id="pct-f">0%</span>
+  </div>
+  <div class="bci-bar-row">
+    <span class="bci-bar-label">Blink</span>
+    <div class="bci-bar-track"><div class="bci-bar-fill bci-blink" id="bar-b"></div></div>
+    <span class="bci-bar-pct" id="pct-b">0%</span>
+  </div>
+
+  <div class="bci-blink-counter">
+    <span class="bci-label">2 秒內眨眼</span>
+    <div class="bci-blink-dots">
+      <div class="bci-blink-dot" id="dot-1"></div>
+      <div class="bci-blink-dot" id="dot-2"></div>
+      <div class="bci-blink-dot" id="dot-3"></div>
+    </div>
+  </div>
+
+  <div class="bci-events" id="events"></div>
+</div>
+
+<div id="bci-toast" style="display:none">✓ 播放/暫停</div>
+
+<script>
+const SCENARIOS = {
+  focus: {
+    bars: [10, 75, 15], blinks: 0, toast: null,
+    events: [
+      ["10:23:45", "下一首"],
+      ["10:22:11", "播放/暫停"],
+    ]
+  },
+  blink1: {
+    bars: [5, 20, 75], blinks: 1, toast: "✓ 播放/暫停",
+    events: [
+      ["10:24:02", "播放/暫停"],
+      ["10:23:45", "下一首"],
+    ]
+  },
+  blink2: {
+    bars: [3, 10, 87], blinks: 2, toast: "✓ 下一首",
+    events: [
+      ["10:24:18", "下一首"],
+      ["10:24:02", "播放/暫停"],
+    ]
+  },
+  blink3: {
+    bars: [2, 5, 93], blinks: 3, toast: "✓ 上一首",
+    events: [
+      ["10:24:35", "上一首"],
+      ["10:24:18", "下一首"],
+      ["10:24:02", "播放/暫停"],
+    ]
+  },
+  relax: {
+    bars: [78, 18, 4], blinks: 0, toast: null, events: []
+  },
+};
+
+function apply(s) {
+  const sc = SCENARIOS[s];
+  document.getElementById("bar-r").style.width = sc.bars[0] + "%";
+  document.getElementById("bar-f").style.width = sc.bars[1] + "%";
+  document.getElementById("bar-b").style.width = sc.bars[2] + "%";
+  document.getElementById("pct-r").textContent = sc.bars[0] + "%";
+  document.getElementById("pct-f").textContent = sc.bars[1] + "%";
+  document.getElementById("pct-b").textContent = sc.bars[2] + "%";
+  for (let i = 1; i <= 3; i++) {
+    document.getElementById("dot-" + i).classList.toggle("bci-on", i <= sc.blinks);
+  }
+  const toast = document.getElementById("bci-toast");
+  if (sc.toast) {
+    toast.textContent = sc.toast;
+    toast.style.display = "block";
+  } else {
+    toast.style.display = "none";
+  }
+  const ev = document.getElementById("events");
+  ev.innerHTML = sc.events.map(([t, a]) =>
+    `<div class="bci-event">${t} <span class="bci-action">${a}</span></div>`
+  ).join("");
+}
+
+document.querySelectorAll(".scenario-picker button").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".scenario-picker button").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
+    apply(b.dataset.s);
+  });
+});
+
+apply("focus");
+</script>
+
+</body>
+</html>

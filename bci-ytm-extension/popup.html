@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>BCI YT Music Controller</title>
+<style>
+  body {
+    width: 280px;
+    margin: 0;
+    padding: 14px;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 13px;
+  }
+  h2 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    letter-spacing: 0.3px;
+  }
+  label {
+    display: block;
+    margin: 10px 0 4px;
+    color: #bbb;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  input[type=text] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    background: #2a2a2a;
+    border: 1px solid #333;
+    color: #fff;
+    border-radius: 6px;
+    font-family: monospace;
+  }
+  .toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #2a2a2a;
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+  }
+  .toggle input { transform: scale(1.3); }
+  .hint {
+    color: #888;
+    font-size: 11px;
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+  button {
+    width: 100%;
+    padding: 8px;
+    margin-top: 10px;
+    background: #1ed760;
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:hover { background: #19b450; }
+</style>
+</head>
+<body>
+  <h2>BCI YT Music Controller</h2>
+
+  <div class="toggle">
+    <span>啟用動作觸發</span>
+    <input type="checkbox" id="enabled">
+  </div>
+
+  <label>WebSocket URL</label>
+  <input type="text" id="wsUrl" placeholder="ws://localhost:8765">
+
+  <button id="save">儲存</button>
+
+  <div class="hint">
+    後端執行：<br>
+    <code style="color:#1ed760">python bci_server.py --source brainflow</code><br><br>
+    眨眼動作（單次眨眼自動忽略）：<br>
+    　2 次 = 播放/暫停<br>
+    　3 次 = 下一首<br>
+    　4 次 = 上一首
+  </div>
+</body>
+<script src="popup.js"></script>
+</html>

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.env
+
+# IDE / agent
+.vscode/
+.idea/
+.claude/
+*.swp
+.DS_Store
+
+# 訓練 / 執行產生的記錄與暫存
+*.log
+save_best_model.log
+server_test.log
+result.txt
+result_v[0-9]*.txt
+
+# 個人化報告（每個人在自己機器上重新產生即可）
+progress_report.html
+report_figures/
+
+# 大型資料集（請另外從共享連結下載到 ./bci_dataset_114-2/）
+bci_dataset_114-2/
+
+# 學術文件（請放在 docs/ 並在那裡管理；避免不慎上傳敏感投影片）
+*.pdf
+
+# 已被 bci_server.py 取代的舊腳本（保留在本機但不上 repo）
+realtime_classify.py
+main.py
+
+# 給組員交接的打包資料夾（git repo 本身就是更好的交接）
+handoff/
+
+# 暫存
+*.tmp
+*.bak
+*.zip
