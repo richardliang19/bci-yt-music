@@ -1,9 +1,9 @@
 """
-BrainLink Lite 連線探測
+BrainLink Lite 連線探測（直接走 pyserial + TGAM 協定，不用 BrainFlow）
 ─────────────────────────────────────────────────────────────
 1. 列出所有 COM port
-2. 對每個 port 試 BrainFlow NeuroSky board 開 5 秒 stream
-3. 若成功 → 印出取樣率、樣本數、振幅範圍
+2. 對每個 port 試開啟、讀 5 秒 TGAM 串流
+3. 若成功 → 印出收到的 raw EEG 樣本數、振幅範圍
 
 執行：
   python -X utf8 -u probe_brainlink.py
@@ -14,6 +14,8 @@ import argparse
 import sys
 import time
 import numpy as np
+
+from signal_sources import BrainLinkSerialSource
 
 
 def list_ports():
@@ -28,42 +30,43 @@ def list_ports():
 
 
 def try_port(port, seconds=5):
+    print(f"\n→ 嘗試 {port}（pyserial + TGAM）…")
     try:
-        from brainflow.board_shim import BoardShim, BrainFlowInputParams, BoardIds
-        from brainflow.exit_codes import BrainFlowError
-    except ImportError:
-        sys.exit("缺少 brainflow：python -m pip install brainflow --user")
-
-    BoardShim.disable_board_logger()
-    params = BrainFlowInputParams()
-    params.serial_port = port
-    bid = BoardIds.NEUROSKY_BOARD.value
-
-    print(f"\n→ 嘗試 {port}（NEUROSKY_BOARD, id={bid}）…")
-    board = BoardShim(bid, params)
-    try:
-        board.prepare_session()
-        board.start_stream()
-        time.sleep(seconds)
-        data = board.get_board_data()
-        board.stop_stream()
-        board.release_session()
-    except BrainFlowError as e:
-        print(f"  ✗ 失敗：{e}")
+        src = BrainLinkSerialSource(port, fs=512)
+    except SystemExit as e:
+        print(f"  ✗ {e}")
+        return False
+    except Exception as e:
+        print(f"  ✗ 開啟失敗：{e}")
         return False
 
-    if data.size == 0:
-        print(f"  ✗ 連線成功但 {seconds}s 內沒收到資料")
+    all_samples = []
+    t0 = time.time()
+    while time.time() - t0 < seconds:
+        new, _ = src.read_new()
+        if len(new):
+            all_samples.append(new)
+        time.sleep(0.1)
+
+    stats = src.stats()
+    src.close()
+
+    if not all_samples:
+        print(f"  ✗ {seconds}s 內沒收到任何 raw wave 樣本")
+        print(f"    解析統計：good={stats['good_packets']} bad={stats['bad_packets']}")
+        if stats['good_packets'] == 0 and stats['bad_packets'] == 0:
+            print(f"    → 完全沒讀到 byte，可能 baud rate 錯或裝置沒在送")
+        elif stats['bad_packets'] > stats['good_packets']:
+            print(f"    → packet 大多無效，可能 baud rate 錯（試 9600）或不是 TGAM 協定裝置")
         return False
 
-    eeg_ch = BoardShim.get_eeg_channels(bid)[0]
-    fs = BoardShim.get_sampling_rate(bid)
-    eeg = data[eeg_ch]
+    eeg = np.concatenate(all_samples)
     print(f"  ✓ 成功！")
-    print(f"    取樣率（驅動回報）：{fs} Hz")
-    print(f"    收到樣本數：{len(eeg)}（理論 {fs*seconds}）")
-    print(f"    振幅範圍：[{eeg.min():.1f}, {eeg.max():.1f}]")
+    print(f"    收到樣本數：{len(eeg)}（理論 {512*seconds}）")
+    print(f"    實際取樣率：~{len(eeg)/seconds:.0f} Hz")
+    print(f"    振幅範圍：[{eeg.min():.0f}, {eeg.max():.0f}]")
     print(f"    平均：{np.mean(eeg):.1f}　標準差：{np.std(eeg):.1f}")
+    print(f"    解析統計：good={stats['good_packets']} bad={stats['bad_packets']}")
     return True
 
 
@@ -95,13 +98,14 @@ def main():
     if success:
         print(f"✓ 可用的 BrainLink port：{success}")
         print(f"\n下一步：")
-        print(f"  python -X utf8 -u bci_server.py --source brainflow:{success[0]}")
+        print(f"  python -X utf8 -u bci_server.py --source brainlink:{success[0]}")
     else:
         print("✗ 沒有可用的 port。常見原因：")
         print("  1. BrainLink 沒開機 / 沒戴上（會自動省電關機）")
-        print("  2. 沒在 Windows 設定完成藍牙配對（先去藍牙設定找到 BrainLink_Lite 配對）")
-        print("  3. 配對成功但 COM port 沒出現 → 重新配對")
-        print("  4. brainlink.exe 還開著佔用 port → 關掉它")
+        print("  2. Windows 藍牙配對失敗 → 重新配對")
+        print("  3. brainlink.exe 還開著佔用 port → 關掉它")
+        print("  4. BrainLink 有兩個 COM port（incoming/outgoing），")
+        print("     有的型號要用 outgoing 那個（通常編號較大）")
 
 
 if __name__ == "__main__":
