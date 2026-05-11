@@ -9,7 +9,85 @@ import os
 import sys
 import time
 import threading
+from collections import deque
 import numpy as np
+
+
+# ── Raw 眼動尖峰偵測（用來數眨眼次數）─────────────────────────────────────────
+class RawBlinkDetector:
+    """
+    從 raw Fp1 訊號直接抓眨眼尖峰。
+
+    為什麼需要這個？
+      模型 (bci_model.pkl) 看 4 秒視窗，把「快速連續眨眼」整段看成「一個
+      blink 狀態」，無法分辨「眨 1 下、2 下、3 下」。但眨眼在 Fp1 電極上
+      會產生 200-500 µV 的明顯瞬間尖峰，用簡單的 threshold + refractory
+      就能可靠數出每一下。
+
+    演算法：
+      1. 維護最近 N 秒的 buffer，估計 baseline = median，spread = 1.4826*MAD
+         （MAD = Median Absolute Deviation，比 std 抗離群值）
+      2. 偵測 |x - baseline| > threshold_mult * spread 的瞬間
+      3. 兩個尖峰之間至少間隔 refractory_s（避免一次眨眼被算成多次）
+    """
+    def __init__(self, fs, threshold_mult=5.0, refractory_s=0.25,
+                 baseline_window_s=3.0, min_amp=80.0):
+        self.fs = fs
+        self.threshold_mult = threshold_mult
+        self.refractory_samples = int(refractory_s * fs)
+        self.baseline_size = int(baseline_window_s * fs)
+        self.min_amp = min_amp                  # 絕對下限，避免低訊號時誤觸
+        self.buf = deque(maxlen=self.baseline_size)
+        self.samples_since_peak = self.refractory_samples + 1
+        self.total_samples = 0
+        # 快取 baseline，每 0.25s 重算一次
+        self._cached_baseline = 0.0
+        self._cached_threshold = self.min_amp
+        self._last_baseline_recalc = 0
+
+    def _recompute_baseline(self):
+        if len(self.buf) < self.fs // 2:
+            return
+        arr = np.fromiter(self.buf, dtype=np.float64)
+        med = float(np.median(arr))
+        mad = float(np.median(np.abs(arr - med))) * 1.4826
+        self._cached_baseline = med
+        self._cached_threshold = max(self.threshold_mult * mad, self.min_amp)
+
+    def update(self, new_samples, now_t):
+        """
+        new_samples: 1D np.ndarray
+        now_t     : 當下 wall time（end of chunk）
+        return    : list[float]  新偵測到的尖峰時間戳（wall time 估計）
+        """
+        if len(new_samples) == 0:
+            return []
+        events = []
+        n = len(new_samples)
+        # 分批塞 buffer + 偵測
+        for i, val in enumerate(new_samples):
+            self.buf.append(float(val))
+            self.samples_since_peak += 1
+            self.total_samples += 1
+            # 0.25s 重算一次 baseline
+            if self.total_samples - self._last_baseline_recalc > self.fs // 4:
+                self._recompute_baseline()
+                self._last_baseline_recalc = self.total_samples
+            # 偵測
+            if (abs(val - self._cached_baseline) > self._cached_threshold
+                    and self.samples_since_peak >= self.refractory_samples):
+                # 估計這個尖峰的 wall time
+                t = now_t - (n - i) / self.fs
+                events.append(t)
+                self.samples_since_peak = 0
+        return events
+
+    def get_state(self):
+        return {
+            "baseline": self._cached_baseline,
+            "threshold": self._cached_threshold,
+            "buf_filled": len(self.buf),
+        }
 
 
 # ── 檔案回放 ──────────────────────────────────────────────────────────────────
