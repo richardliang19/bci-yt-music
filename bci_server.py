@@ -1,25 +1,27 @@
 """
 BCI WebSocket 伺服器
 ─────────────────────────────────────────────────────────────
-腦波 → 模型推論（顯示用）+ raw 尖峰偵測（數眨眼次數）→ 廣播 JSON
+腦波 → 模型推論 → 廣播 JSON 給 Chrome 擴充
+不負責 UI、不操作播放器，只是訊息源。
 
-兩條獨立判讀軌道：
-  1. ML 模型 (bci_model.pkl)：分類 Relax/Focus/Blink 整體狀態（給 overlay 顯示）
-  2. RawBlinkDetector：直接從 raw EEG 抓眼動尖峰，可靠數出眨眼次數
-     → 模型對「快速連續眨眼」會看成 1 個事件（4 秒視窗解析度限制），
-       raw 偵測能正確分辨每一下，與使用者直覺一致
+判讀邏輯（model-based duration buckets）：
+  ── 模型輸出 Blink probability，hysteresis state machine 偵測
+     「進入 / 離開」連續眨眼狀態
+  ── 一段連續眨眼結束時，計算 hold duration = exit_t - enter_t
+  ── 依 duration 對應動作：
+       <1.0s     → ignored（生理性眨眼）
+       1.0-2.5s  → play_pause
+       2.5-5.0s  → next
+       5.0-8.0s  → prev
+       >8.0s     → ignored（訊號黏住或沒及時停動作）
 
-眨眼數 → 動作：
-  1 次 = 忽略（過濾自然反射）
-  2 次 = 播放/暫停
-  3 次 = 下一首
-  4+ 次 = 上一首
+「連續眨眼」是指快速反覆眨眼（不是閉眼不動 — 那會出 alpha 波被歸成 Relax）。
 
 訊息格式：
   {"type":"status","connected":true,"source":"...","fs":512}
   {"type":"proba","ts":...,"relax":..,"focus":..,"blink":..,"pred":"...",
-   "blink_events":N,"is_blinking":bool}
-  {"type":"action","ts":...,"action":"play_pause|next|prev","blink_count":N}
+   "is_blinking":bool,"hold_duration":float}
+  {"type":"action","ts":...,"action":"play_pause|next|prev","hold_duration":float}
 
 執行：
   python -X utf8 -u bci_server.py --source dummy
@@ -44,7 +46,7 @@ except ImportError:
     sys.exit("未安裝 websockets，請執行：python -m pip install websockets --user")
 
 from train_compare import extract_features
-from signal_sources import make_source, RawBlinkDetector
+from signal_sources import make_source
 
 
 CLIENTS = set()
@@ -80,16 +82,22 @@ async def handler(ws):
         print(f"[WS] client 斷開，剩 {len(CLIENTS)} 個")
 
 
-def action_for_blinks(n):
-    if n < 2:
+def action_for_duration(d, b1, b2, b3, bmax):
+    """
+    持續秒數 → 動作（None 表示忽略）
+      d < b1     → None（生理性眨眼）
+      b1..b2     → play_pause
+      b2..b3     → next
+      b3..bmax   → prev
+      d >= bmax  → None（訊號黏住）
+    """
+    if d < b1 or d >= bmax:
         return None
-    if n == 2:
+    if d < b2:
         return "play_pause"
-    if n == 3:
+    if d < b3:
         return "next"
-    if n >= 4:
-        return "prev"
-    return None
+    return "prev"
 
 
 async def infer_loop(args):
@@ -107,31 +115,24 @@ async def infer_loop(args):
 
     src = make_source(args.source, fs)
     LAST_STATUS = {"type": "status", "connected": True,
-                   "source": args.source, "fs": fs}
+                   "source": args.source, "fs": fs,
+                   "buckets": [args.bucket_1, args.bucket_2, args.bucket_3, args.bucket_max]}
     await broadcast(LAST_STATUS)
 
     buf = deque(maxlen=win_n)
     proba_hist = deque(maxlen=args.smooth)
 
-    # Raw 眨眼偵測器（每進來新樣本就餵進去）
-    blink_det = RawBlinkDetector(
-        fs,
-        threshold_mult=args.peak_thresh_mult,
-        refractory_s=args.peak_refractory,
-        baseline_window_s=3.0,
-        min_amp=args.peak_min_amp,
-    )
-    blink_events = deque()      # raw detector 回報的尖峰時間戳
-
+    # Hysteresis state machine
+    is_blinking = False
+    blink_start_t = None
     last_pred_t = 0.0
     last_action_t = 0.0
 
-    print(f"開始推論（顯示每 {args.step}s 一次，平滑視窗 {args.smooth}）")
-    print(f"Raw 眨眼偵測：threshold = {args.peak_thresh_mult}×MAD（最低 {args.peak_min_amp} µV）"
-          f"  refractory = {args.peak_refractory}s")
-    print(f"Burst 視窗：{args.burst_window}s  收尾延遲：{args.burst_end_gap}s  "
-          f"動作冷卻：{args.action_cooldown}s")
-    print(f"動作對應：1次=忽略  2次=播放/暫停  3次=下一首  4+次=上一首")
+    print(f"開始推論（每 {args.step}s 一次，平滑 {args.smooth}）")
+    print(f"門檻：enter={args.enter_thresh}  exit={args.exit_thresh}")
+    print(f"Bucket：忽略 < {args.bucket_1}s ≤ play_pause < {args.bucket_2}s "
+          f"≤ next < {args.bucket_3}s ≤ prev < {args.bucket_max}s ≤ 忽略")
+    print(f"提示：是「連續快速眨眼」N 秒（不是閉眼不動）。")
     print("=" * 60)
 
     try:
@@ -139,24 +140,11 @@ async def infer_loop(args):
             new, eof = src.read_new()
             if len(new):
                 buf.extend(new.tolist())
-                # 餵 raw 偵測器
-                new_events = blink_det.update(new, time.time())
-                for t in new_events:
-                    blink_events.append(t)
-                    print(f"  · 偵測到眨眼尖峰 #{len(blink_events)}"
-                          f"  (baseline={blink_det._cached_baseline:.0f},"
-                          f" thresh={blink_det._cached_threshold:.0f})")
             if eof and len(buf) < win_n:
                 print("[infer] 來源結束")
                 break
 
             now = time.time()
-
-            # 清掉視窗外的舊事件
-            while blink_events and (now - blink_events[0]) > args.burst_window:
-                blink_events.popleft()
-
-            # 模型推論：每 step 秒一次（純粹給 UI 顯示用）
             if len(buf) >= win_n and (now - last_pred_t) >= args.step:
                 last_pred_t = now
                 seg = np.asarray(buf, dtype=np.float64)
@@ -169,34 +157,60 @@ async def infer_loop(args):
                 blink_p = float(avg[2])
                 pred = int(np.argmax(avg))
 
+                # ── Hysteresis state machine ────────────────────
+                fired_action = None
+                fired_duration = None
+                if is_blinking:
+                    if blink_p < args.exit_thresh:
+                        duration = now - blink_start_t
+                        action = action_for_duration(
+                            duration, args.bucket_1, args.bucket_2,
+                            args.bucket_3, args.bucket_max)
+                        if action is None:
+                            if duration < args.bucket_1:
+                                reason = "太短，當生理性眨眼"
+                            else:
+                                reason = "太長，可能訊號黏住"
+                            print(f"  ↪ 連續眨眼 {duration:.2f}s → 忽略（{reason}）")
+                        elif (now - last_action_t) >= args.action_cooldown:
+                            fired_action = action
+                            fired_duration = duration
+                            print(f"  ▶ 觸發動作：{action}（連續眨眼 {duration:.2f}s）")
+                            last_action_t = now
+                        else:
+                            print(f"  ↪ 連續眨眼 {duration:.2f}s → 忽略（動作冷卻中）")
+                        is_blinking = False
+                        blink_start_t = None
+                else:
+                    if blink_p >= args.enter_thresh:
+                        is_blinking = True
+                        blink_start_t = now
+                        print(f"  · 進入連續眨眼狀態（B={blink_p:.2f}）")
+
+                # Hold duration（仍在連續眨眼狀態時即時更新）
+                hold_duration = (now - blink_start_t) if is_blinking else 0.0
+
+                # 廣播
                 msg = {
                     "type": "proba", "ts": now,
                     "relax": float(avg[0]), "focus": float(avg[1]), "blink": blink_p,
                     "pred": labels[pred],
-                    "blink_events": len(blink_events),
-                    "is_blinking": False,   # 不再用 model 判此狀態
+                    "is_blinking": is_blinking,
+                    "hold_duration": hold_duration,
                     "source": args.source,
                 }
                 await broadcast(msg)
-                print(f"[{time.strftime('%H:%M:%S')}] R={avg[0]:.2f} F={avg[1]:.2f} "
-                      f"B={blink_p:.2f} → {labels[pred]} events={len(blink_events)}")
 
-            # Burst 結算：最後一個尖峰後 burst-end-gap 秒沒新尖峰 → fire
-            if (blink_events
-                    and (now - blink_events[-1]) >= args.burst_end_gap
-                    and (now - last_action_t) >= args.action_cooldown):
-                n = len(blink_events)
-                action = action_for_blinks(n)
-                if action is None:
-                    print(f"  ↪ {n} 次眨眼 → 忽略（生理性眨眼）")
-                else:
+                if fired_action is not None:
                     await broadcast({
                         "type": "action", "ts": now,
-                        "action": action, "blink_count": n,
+                        "action": fired_action,
+                        "hold_duration": fired_duration,
                     })
-                    print(f"  ▶ 觸發動作：{action}（{n} 次眨眼）")
-                    last_action_t = now
-                blink_events.clear()
+
+                hold_str = f"hold={hold_duration:.1f}s" if is_blinking else ""
+                print(f"[{time.strftime('%H:%M:%S')}] R={avg[0]:.2f} F={avg[1]:.2f} "
+                      f"B={blink_p:.2f} → {labels[pred]} {hold_str}")
 
             await asyncio.sleep(0.02)
     except asyncio.CancelledError:
@@ -228,23 +242,26 @@ def main():
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--step", type=float, default=0.5,
-                    help="模型推論間隔秒（給 UI 顯示用，預設 0.5）")
+                    help="模型推論間隔秒（預設 0.5）")
     ap.add_argument("--smooth", type=int, default=2,
-                    help="模型機率平滑視窗（預設 2，越大越平穩但 delay 越久）")
+                    help="模型機率平滑視窗（預設 2，越大越平穩 delay 越久）")
 
-    # Raw 眨眼尖峰偵測器
-    ap.add_argument("--peak-thresh-mult", type=float, default=5.0,
-                    help="尖峰門檻 = N × MAD（預設 5.0；太敏感→調高，太遲鈍→調低）")
-    ap.add_argument("--peak-min-amp", type=float, default=80.0,
-                    help="尖峰絕對下限 µV（預設 80，避免低訊號時誤觸）")
-    ap.add_argument("--peak-refractory", type=float, default=0.25,
-                    help="兩個尖峰最小間隔秒（預設 0.25，避免一下眨眼算成多下）")
+    # Hysteresis 門檻
+    ap.add_argument("--enter-thresh", type=float, default=0.55,
+                    help="進入連續眨眼狀態的 Blink 機率門檻（預設 0.55）")
+    ap.add_argument("--exit-thresh", type=float, default=0.40,
+                    help="離開連續眨眼狀態的門檻（hysteresis 防抖，預設 0.40）")
 
-    # Burst 結算
-    ap.add_argument("--burst-window", type=float, default=3.0,
-                    help="Burst 最大視窗秒數（預設 3.0）")
-    ap.add_argument("--burst-end-gap", type=float, default=1.0,
-                    help="最後一個尖峰後等多久才確認 burst 完成（預設 1.0）")
+    # Duration bucket 邊界
+    ap.add_argument("--bucket-1", type=float, default=1.0,
+                    help="忽略 / play_pause 邊界秒數（預設 1.0）")
+    ap.add_argument("--bucket-2", type=float, default=2.5,
+                    help="play_pause / next 邊界（預設 2.5）")
+    ap.add_argument("--bucket-3", type=float, default=5.0,
+                    help="next / prev 邊界（預設 5.0）")
+    ap.add_argument("--bucket-max", type=float, default=8.0,
+                    help="prev / 忽略（訊號黏住）邊界（預設 8.0）")
+
     ap.add_argument("--action-cooldown", type=float, default=1.5,
                     help="動作觸發後冷卻秒數（預設 1.5）")
 

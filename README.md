@@ -2,14 +2,17 @@
 
 > 期末專題 · 基於 BCI 腦波感測之情境式音樂切換與控制系統
 
-戴上 BrainLink Lite 腦波頭環 → 用「**刻意連續眨眼**」直接操作 YouTube Music 網頁版：
+戴上 BrainLink Lite 腦波頭環 → 用「**連續快速眨眼幾秒**」直接操作 YouTube Music 網頁版：
 
-| 連續眨眼次數 | 動作 |
+| 連續眨眼持續時間 | 動作 |
 |---|---|
-| 1 次 | 自動忽略（防止生理性眨眼誤觸） |
-| 2 次 | 播放 / 暫停 |
-| 3 次 | 下一首 |
-| 4 次 | 上一首 |
+| < 1 秒 | 自動忽略（過濾自然反射） |
+| 1.0 ~ 2.5 秒 | 播放 / 暫停 |
+| 2.5 ~ 5.0 秒 | 下一首 |
+| 5.0 ~ 8.0 秒 | 上一首 |
+| > 8 秒 | 自動忽略（防訊號黏住） |
+
+> ⚠️ 是「**快速反覆眨眼**」（像有東西飛來眼睛要連眨擋），不是「閉眼不動」。閉眼不動腦波是 alpha 波會被歸成 Relax 而非 Blink。
 
 模型：Ensemble (RandomForest + SVM + LDA)，16 受試者 LOSO 驗證 **83.3% ± 14.0%**。
 
@@ -57,8 +60,8 @@ python -X utf8 -u bci_server.py --source dummy
 python -X utf8 -u bci_server.py --source file:sample_data/sample_blink.txt
 ```
 開 https://music.youtube.com → 右下角應出現 BCI overlay，連線燈轉綠。
-看到 console 印「· 偵測到眨眼事件 #1（持續 X 秒）」+「↪ 1 次眨眼 → 忽略」就是 pipeline 通了
-（連續眨眼 = 1 個事件，會被當生理性眨眼忽略，這是預期行為）。
+看到 console 印「· 進入連續眨眼狀態」+「↪ 連續眨眼 X.XXs → 忽略（太長，可能訊號黏住）」就是 pipeline 通了。
+（sample_blink.txt 是連續眨眼 20 秒的錄音，model duration 會 > 8s 落在「忽略」桶）
 
 ### 4. 接 BrainLink Lite 真機
 ```powershell
@@ -66,11 +69,11 @@ python -X utf8 -u bci_server.py --source file:sample_data/sample_blink.txt
 python -X utf8 -u probe_brainlink.py
 
 # 跑即時系統（COM3 換成你的 port）
-python -X utf8 -u bci_server.py --source brainflow:COM3
+python -X utf8 -u bci_server.py --source brainlink:COM3
 ```
 
 ### 5. 操作
-**節奏建議**：連續眨 1-2 秒 → 停 1.5 秒 → 再眨 1-2 秒。系統會在你「眨完最後一下後 1.5 秒」沒新眨眼時執行動作。
+**做動作**：連續快速眨眼 N 秒 → 停下來 → 系統依持續時間執行對應動作（1-2.5s 暫停、2.5-5s 下一首、5-8s 上一首）。不是閉眼不動！
 
 更詳細請看 [bci-ytm-extension/README.md](bci-ytm-extension/README.md)。
 

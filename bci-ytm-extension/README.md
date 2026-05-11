@@ -13,8 +13,8 @@
 
 ### 步驟 1 — 啟動 Python 後端
 ```
-cd c:/Users/chile/Desktop/BME/final
-python -X utf8 -u bci_server.py --source brainflow
+cd c:/Users/chile/Desktop/BME/final/bci-yt-music
+python -X utf8 -u bci_server.py --source brainlink:COM3
 ```
 （沒接裝置可先用 `--source dummy` 測 UI）
 
@@ -25,18 +25,22 @@ https://music.youtube.com
 應該會出現浮動 BCI overlay：
 - 連線燈轉綠 = 後端連上
 - Relax / Focus / Blink 三條機率即時跳動
-- 連續眨眼會點亮下方紅點
-- 觸發動作時跳出綠色 toast，並自動點 YT Music 的播放鈕
+- 「連續眨眼時長」進度條：你開始眨時計時，停下時依停在哪個 bucket 觸發動作
+- 觸發時跳出綠色 toast、自動點 YT Music 的對應按鈕
 
-### 動作對應
-| 連續眨眼次數 | 動作 | 備註 |
+### 動作對應（依持續秒數）
+| 持續時間 | 動作 | 備註 |
 |---|---|---|
-| 1 | （忽略）| 自動過濾，避免被自然反射觸發 |
-| 2 | 播放 / 暫停 | 最常用動作 |
-| 3 | 下一首 | |
-| 4 | 上一首 | |
+| < 1 秒 | （忽略）| 過濾自然眨眼反射 |
+| 1.0 – 2.5 秒 | 播放 / 暫停 | 最常用動作 |
+| 2.5 – 5.0 秒 | 下一首 | |
+| 5.0 – 8.0 秒 | 上一首 | |
+| > 8 秒 | （忽略）| 防訊號黏住或沒及時停 |
 
-> 系統會等你「眨完最後一下後 0.8 秒」沒新眨眼，才執行動作 — 所以 1/2/3/4 次絕對不會混淆。
+> **重要**：是「**連續快速眨眼**」（像有東西飛來眼睛要連眨擋住），不是「閉眼不動」。
+> 閉眼不動腦波會出 alpha 波被歸到 Relax，不會觸發。
+>
+> 你停止眨眼時動作才執行（停止後約 1-2 秒）。Overlay 會即時顯示你目前在哪個 bucket。
 
 ## 設定
 
@@ -51,4 +55,5 @@ https://music.youtube.com
 | Overlay 沒出現 | F12 → Console 看有沒有錯，確認網址是 `music.youtube.com` |
 | 連線燈紅 | `bci_server.py` 沒跑、或 port 不對、或防火牆擋 8765 |
 | 按鈕沒按到（toast 顯示「找不到 X 按鈕」）| YT Music DOM 改了，F12 → Elements 找新 selector，改 `content.js` `selectors` |
-| 觸發太敏感 | 後端加 `--blink-conf 0.7` 或 `--burst-window 1.5` |
+| 觸發太敏感 | 後端加 `--enter-thresh 0.7`（要更明顯的眨眼才進入狀態） |
+| Bucket 邊界對不上你習慣 | 調 `--bucket-1/2/3/max`，例如 `--bucket-1 1.5 --bucket-2 3.0` |

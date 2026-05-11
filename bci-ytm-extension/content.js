@@ -1,10 +1,10 @@
 // ──────────────────────────────────────────────────────────
 // BCI YT Music Controller — content script
 // 1. 連 ws://localhost:8765 收 BCI 後端訊息
-// 2. 注入浮動 overlay 顯示機率條 + 眨眼事件計數
+// 2. 注入浮動 overlay 顯示機率條 + 連續眨眼持續時間
 // 3. 收到 action → 直接 click YT Music 頁面播放鈕
-// 動作對應：2 次=播放/暫停  3 次=下一首  4 次=上一首
-//          （單次眨眼 = 自然反射，後端會自動忽略）
+// 動作對應（依「連續快速眨眼」的持續時間）：
+//   <1s = 忽略   1-2.5s = 播放/暫停   2.5-5s = 下一首   5-8s = 上一首
 // ──────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG = {
@@ -18,6 +18,9 @@ let reconnectTimer = null;
 let overlayEl = null;
 let toastEl = null;
 let recentEvents = [];
+
+// 預設 bucket，後端 status 訊息會覆蓋
+let buckets = [1.0, 2.5, 5.0, 8.0];
 
 const ACTION_NAMES = {
   play_pause: "播放/暫停",
@@ -72,16 +75,21 @@ function buildOverlay() {
       <span class="bci-bar-pct">0%</span>
     </div>
 
-    <div class="bci-blink-counter">
-      <div class="bci-blink-row">
-        <span class="bci-label">眨眼事件</span>
-        <span class="bci-blink-status" id="bci-burst-status">— 等待中 —</span>
+    <div class="bci-hold-section">
+      <div class="bci-hold-row">
+        <span class="bci-label">連續眨眼時長</span>
+        <span class="bci-hold-time" id="bci-hold-time">0.0s</span>
       </div>
-      <div class="bci-blink-dots">
-        <div class="bci-blink-dot" data-n="1"><span class="bci-dot-tip">忽略</span></div>
-        <div class="bci-blink-dot" data-n="2"><span class="bci-dot-tip">▶❚❚</span></div>
-        <div class="bci-blink-dot" data-n="3"><span class="bci-dot-tip">⏭</span></div>
-        <div class="bci-blink-dot" data-n="4"><span class="bci-dot-tip">⏮</span></div>
+      <div class="bci-bucket-bar" id="bci-bucket-bar">
+        <div class="bci-bucket bci-bucket-ignore" data-bucket="0"><span>忽略</span></div>
+        <div class="bci-bucket bci-bucket-pp"     data-bucket="1"><span>▶❚❚</span></div>
+        <div class="bci-bucket bci-bucket-next"   data-bucket="2"><span>⏭</span></div>
+        <div class="bci-bucket bci-bucket-prev"   data-bucket="3"><span>⏮</span></div>
+        <div class="bci-bucket bci-bucket-ignore" data-bucket="4"><span>忽略</span></div>
+        <div class="bci-bucket-marker" id="bci-bucket-marker"></div>
+      </div>
+      <div class="bci-bucket-labels" id="bci-bucket-labels">
+        <span>0</span><span>1.0</span><span>2.5</span><span>5.0</span><span>8.0s</span>
       </div>
     </div>
 
@@ -128,8 +136,22 @@ function setStatus(on, text) {
 function handleMessage(msg) {
   if (!msg || !msg.type) return;
   if (msg.type === "proba")  updateProba(msg);
-  if (msg.type === "action") doAction(msg.action, msg.blink_count);
-  if (msg.type === "status") setStatus(msg.connected, msg.connected ? "推論中" : "後端停止");
+  if (msg.type === "action") doAction(msg.action, msg.hold_duration);
+  if (msg.type === "status") {
+    setStatus(msg.connected, msg.connected ? "推論中" : "後端停止");
+    if (msg.buckets && msg.buckets.length === 4) {
+      buckets = msg.buckets;
+      updateBucketLabels();
+    }
+  }
+}
+
+function updateBucketLabels() {
+  const labels = document.getElementById("bci-bucket-labels");
+  if (!labels) return;
+  labels.innerHTML = `<span>0</span>` + buckets.map((b, i) =>
+    `<span>${b.toFixed(1)}${i === 3 ? 's' : ''}</span>`
+  ).join("");
 }
 
 function updateProba(msg) {
@@ -142,34 +164,37 @@ function updateProba(msg) {
     pcts[i].textContent = `${(v * 100).toFixed(0)}%`;
   });
 
-  const dots = overlayEl.querySelectorAll(".bci-blink-dot");
-  const n = msg.blink_events || 0;
-  dots.forEach((d, i) => {
-    d.classList.remove("bci-on", "bci-warn", "bci-good");
-    if (i < n) {
-      // 第 1 顆 = 警告色（會被忽略），第 2-4 顆 = 綠色（會觸發動作）
-      d.classList.add(i === 0 ? "bci-warn" : "bci-good", "bci-on");
-    }
-  });
+  const d = msg.hold_duration || 0;
+  const isHolding = msg.is_blinking;
 
-  const status = overlayEl.querySelector("#bci-burst-status");
-  if (msg.is_blinking) {
-    status.textContent = "⚡ 偵測中…";
-    status.style.color = "#ff7070";
-  } else if (n === 0) {
-    status.textContent = "— 等待中 —";
-    status.style.color = "#888";
-  } else if (n === 1) {
-    status.textContent = "需 ≥ 2 次才觸發";
-    status.style.color = "#f5a623";
-  } else {
-    const action = ({2: "播放/暫停", 3: "下一首", 4: "上一首"})[Math.min(n, 4)];
-    status.textContent = `將觸發：${action}`;
-    status.style.color = "#1ed760";
+  // 時間數字
+  const timeEl = document.getElementById("bci-hold-time");
+  timeEl.textContent = `${d.toFixed(1)}s`;
+  timeEl.style.color = isHolding ? "#1ed760" : "#888";
+
+  // bucket marker 位置（用 % 對映到時間軸 0..bucket_max）
+  const marker = document.getElementById("bci-bucket-marker");
+  const max = buckets[3];
+  const pct = Math.min(d / max, 1.0) * 100;
+  marker.style.left = `${pct}%`;
+  marker.style.opacity = isHolding ? "1" : "0";
+
+  // 高亮目前在哪個 bucket
+  const buckEls = overlayEl.querySelectorAll(".bci-bucket");
+  let activeIdx = -1;
+  if (isHolding) {
+    if      (d < buckets[0]) activeIdx = 0;
+    else if (d < buckets[1]) activeIdx = 1;
+    else if (d < buckets[2]) activeIdx = 2;
+    else if (d < buckets[3]) activeIdx = 3;
+    else                     activeIdx = 4;
   }
+  buckEls.forEach((el, i) => {
+    el.classList.toggle("bci-bucket-active", i === activeIdx);
+  });
 }
 
-function doAction(action, count) {
+function doAction(action, holdDuration) {
   if (!config.enabled) {
     showToast(`已停用 → 略過 ${ACTION_NAMES[action] || action}`);
     return;
@@ -190,9 +215,10 @@ function doAction(action, count) {
     if (el) { el.click(); clicked = sel; break; }
   }
   const niceName = ACTION_NAMES[action] || action;
+  const dStr = holdDuration ? `${holdDuration.toFixed(1)}s` : "";
   if (clicked) {
-    showToast(`✓ ${niceName}（${count} 次眨眼）`);
-    pushEvent(niceName, count);
+    showToast(`✓ ${niceName}（${dStr}）`);
+    pushEvent(niceName, dStr);
   } else {
     showToast(`✗ 找不到 ${niceName} 按鈕`);
     console.warn("[BCI] 找不到按鈕", action, list);
@@ -207,13 +233,13 @@ function showToast(text) {
   showToast._t = setTimeout(() => toastEl.classList.remove("bci-show"), 1500);
 }
 
-function pushEvent(action, count) {
+function pushEvent(action, dStr) {
   const ts = new Date().toLocaleTimeString("zh-TW", { hour12: false });
-  recentEvents.unshift({ ts, action, count });
+  recentEvents.unshift({ ts, action, dStr });
   recentEvents = recentEvents.slice(0, 3);
   const box = overlayEl?.querySelector(".bci-events");
   if (!box) return;
   box.innerHTML = recentEvents
-    .map(e => `<div class="bci-event">${e.ts} <span class="bci-action">${e.action}</span> <span class="bci-count">×${e.count}</span></div>`)
+    .map(e => `<div class="bci-event">${e.ts} <span class="bci-action">${e.action}</span> <span class="bci-count">${e.dStr}</span></div>`)
     .join("");
 }

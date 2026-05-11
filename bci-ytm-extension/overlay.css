@@ -92,66 +92,81 @@
   color: #aaa;
 }
 
-/* ── 眨眼事件計數 ─────────────────────────────────────────── */
-#bci-overlay .bci-blink-counter {
+/* ── 連續眨眼時長 + bucket bar ───────────────────────────── */
+#bci-overlay .bci-hold-section {
   margin-top: 12px;
   padding: 10px;
   background: rgba(255, 255, 255, 0.04);
   border-radius: 8px;
 }
-#bci-overlay .bci-blink-row {
+#bci-overlay .bci-hold-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
 }
-#bci-overlay .bci-blink-counter .bci-label {
+#bci-overlay .bci-label {
   font-size: 11px;
   color: #ccc;
   font-weight: 600;
 }
-#bci-overlay .bci-blink-status {
-  font-size: 11px;
+#bci-overlay .bci-hold-time {
+  font-size: 14px;
   color: #888;
-  font-weight: 500;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.15s;
 }
-#bci-overlay .bci-blink-dots {
+#bci-overlay .bci-bucket-bar {
+  position: relative;
   display: flex;
-  gap: 6px;
-  justify-content: space-between;
-}
-#bci-overlay .bci-blink-dot {
-  flex: 1;
-  height: 28px;
+  height: 26px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  transition: all 0.15s;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+#bci-overlay .bci-bucket {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-#bci-overlay .bci-blink-dot .bci-dot-tip {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.3px;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.04);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.15s;
 }
-#bci-overlay .bci-blink-dot.bci-warn {
-  background: rgba(245, 166, 35, 0.25);
-  border-color: #f5a623;
+#bci-overlay .bci-bucket:last-child { border-right: none; }
+#bci-overlay .bci-bucket.bci-bucket-ignore { background: rgba(255,255,255,0.03); }
+#bci-overlay .bci-bucket.bci-bucket-pp     { background: rgba(74, 144, 226, 0.10); color: #5fa8ff; }
+#bci-overlay .bci-bucket.bci-bucket-next   { background: rgba(245, 166, 35, 0.10); color: #ffc857; }
+#bci-overlay .bci-bucket.bci-bucket-prev   { background: rgba(189, 16, 224, 0.10); color: #d870f2; }
+
+#bci-overlay .bci-bucket.bci-bucket-active {
+  background: rgba(30, 215, 96, 0.45);
+  color: #fff;
+  box-shadow: inset 0 0 8px rgba(30, 215, 96, 0.6);
 }
-#bci-overlay .bci-blink-dot.bci-warn .bci-dot-tip {
-  color: #f5a623;
+#bci-overlay .bci-bucket-marker {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 3px;
+  background: #1ed760;
+  box-shadow: 0 0 8px #1ed760;
+  transition: left 0.1s linear, opacity 0.2s;
+  opacity: 0;
+  pointer-events: none;
+  border-radius: 2px;
 }
-#bci-overlay .bci-blink-dot.bci-good {
-  background: rgba(30, 215, 96, 0.25);
-  border-color: #1ed760;
-  box-shadow: 0 0 8px rgba(30, 215, 96, 0.4);
-}
-#bci-overlay .bci-blink-dot.bci-good .bci-dot-tip {
-  color: #1ed760;
+#bci-overlay .bci-bucket-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 9px;
+  color: #666;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── 最近觸發紀錄 ─────────────────────────────────────────── */

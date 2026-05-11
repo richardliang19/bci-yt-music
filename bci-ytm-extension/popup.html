@@ -82,11 +82,13 @@
 
   <div class="hint">
     後端執行：<br>
-    <code style="color:#1ed760">python bci_server.py --source brainflow</code><br><br>
-    眨眼動作（單次眨眼自動忽略）：<br>
-    　2 次 = 播放/暫停<br>
-    　3 次 = 下一首<br>
-    　4 次 = 上一首
+    <code style="color:#1ed760">python bci_server.py --source brainlink:COM3</code><br><br>
+    動作（連續快速眨眼的持續時間）：<br>
+    　&lt; 1 秒　＝ 忽略<br>
+    　1-2.5 秒 ＝ 播放/暫停<br>
+    　2.5-5 秒 ＝ 下一首<br>
+    　5-8 秒 　＝ 上一首<br><br>
+    <span style="color:#f5a623">提示：是「快速反覆眨眼」，不是閉眼不動</span>
   </div>
 </body>
 <script src="popup.js"></script>
