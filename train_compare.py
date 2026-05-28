@@ -22,8 +22,8 @@ import csv
 warnings.filterwarnings("ignore")
 
 class Config:
-    DATASET_PATH = "bci_dataset_114-2"
-    EXCLUDED_SUBJECTS = frozenset({"S08", "S10"})  # 訊號品質不佳，剃除
+    DATASET_PATH = "bci_dataset_114-2_update/bci_dataset_114-2_any"
+    EXCLUDED_SUBJECTS = frozenset({"S13", "S14"})  # S13 準確率=亂猜(0.33)、S14<0.6，訊號無可分性
     SAMPLING_RATE = 512
     SEGMENT_LENGTH = 4
     OVERLAP_RATIO = 0.5

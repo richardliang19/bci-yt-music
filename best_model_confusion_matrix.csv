@@ -1,4 +1,4 @@
-Confusion Matrix (Ensemble(RF+SVM+LDA)),Pred:Relax,Pred:Focus,Pred:Blink
-Actual:Relax,3906,401,1
-Actual:Focus,958,3153,200
-Actual:Blink,258,335,3708
+Confusion Matrix (MLP),Pred:Relax,Pred:Focus,Pred:Blink
+Actual:Relax,3877,424,1
+Actual:Focus,807,3461,41
+Actual:Blink,78,210,4007

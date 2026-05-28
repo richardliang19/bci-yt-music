@@ -25,8 +25,10 @@ result_v[0-9]*.txt
 progress_report.html
 report_figures/
 
-# 大型資料集（請另外從共享連結下載到 ./bci_dataset_114-2/）
+# 大型資料集（請另外從共享連結下載）
 bci_dataset_114-2/
+bci_dataset_114-2_update/
+*.zip
 
 # 學術文件（請放在 docs/ 並在那裡管理；避免不慎上傳敏感投影片）
 *.pdf

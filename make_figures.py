@@ -144,6 +144,9 @@ def fig_per_subject():
 def fig_confusion_matrix():
     with open("best_model_confusion_matrix.csv", encoding="utf-8") as f:
         rows = list(csv.reader(f))
+    # 第一格形如 "Confusion Matrix (MLP)"，抓出模型名
+    header = rows[0][0]
+    best_name = header.split("(", 1)[1].rstrip(")") if "(" in header else "最佳模型"
     cm = np.array([[int(x) for x in r[1:]] for r in rows[1:]])
     labels = ["Relax", "Focus", "Blink"]
     cm_norm = cm / cm.sum(axis=1, keepdims=True)
@@ -161,7 +164,7 @@ def fig_confusion_matrix():
 
     ax.set_xticks(range(3)); ax.set_xticklabels([f"預測\n{l}" for l in labels])
     ax.set_yticks(range(3)); ax.set_yticklabels([f"實際\n{l}" for l in labels])
-    ax.set_title("Ensemble 混淆矩陣（16 受試者 LOSO 總和）\n"
+    ax.set_title(f"{best_name} 混淆矩陣（16 受試者 LOSO 總和）\n"
                  "顏色：每列 recall · 數字：樣本數 / 百分比")
     cbar = plt.colorbar(im, ax=ax, fraction=0.045)
     cbar.set_label("Recall")
@@ -174,25 +177,25 @@ def fig_band_comparison():
     """從 diagnose 結果固定數值做圖（避免重跑 30 秒）"""
     bands = ["Delta", "Theta", "Alpha", "Beta", "Gamma"]
     data = {
-        "S08\n（剃除）": [
+        "S13\n（剃除，acc=0.33）": [
             [25.6, 20.5, 26.8, 21.0, 5.9],
             [21.0, 27.4, 23.1, 22.3, 6.1],
             [62.7, 20.4, 8.8, 6.3, 1.8],
         ],
-        "S09\n（好，acc=1.00）": [
+        "S12\n（好，acc≈1.00）": [
             [54.6, 21.2, 8.3, 11.1, 4.6],
             [33.3, 10.7, 3.8, 29.1, 22.6],
             [61.5, 19.7, 4.3, 8.9, 5.4],
         ],
-        "S10\n（剃除）": [
-            [20.2, 42.8, 20.6, 12.4, 4.1],
-            [20.0, 44.6, 20.4, 11.3, 3.7],
-            [21.7, 44.0, 19.9, 10.7, 3.6],
+        "S14\n（剃除，acc<0.6）": [
+            [31.9, 18.6, 13.7, 26.5, 9.1],
+            [24.6, 27.6, 14.2, 23.4, 10.1],
+            [33.4, 29.4, 12.8, 17.2, 7.0],
         ],
-        "S15\n（好，acc=0.99）": [
-            [27.1, 41.5, 16.8, 11.7, 2.9],
-            [23.0, 30.4, 12.5, 20.8, 13.1],
-            [42.2, 15.3, 4.7, 18.4, 18.8],
+        "S15\n（好，acc≈0.95）": [
+            [21.5, 16.9, 23.4, 24.3, 13.7],
+            [4.2, 5.8, 8.3, 52.7, 28.3],
+            [55.6, 19.8, 6.4, 12.3, 5.8],
         ],
     }
     fig, axes = plt.subplots(1, 4, figsize=(15, 4.5), sharey=True)
@@ -208,7 +211,7 @@ def fig_band_comparison():
         ax.grid(axis="y", alpha=0.3)
     axes[0].set_ylabel("相對功率 (%)")
     axes[0].legend(loc="upper right", fontsize=10, framealpha=0.95)
-    fig.suptitle("好 / 壞受試者頻帶相對功率對比 — 解釋為什麼剃除 S08 / S10",
+    fig.suptitle("好 / 壞受試者頻帶相對功率對比 — 解釋為什麼剃除 S13 / S14",
                  y=1.02, fontsize=13, fontweight="bold")
     save(fig, "04_band_power_diagnosis")
 
@@ -216,10 +219,17 @@ def fig_band_comparison():
 # ── 5. 剃除前後改善 ───────────────────────────────────────────────────────────
 def fig_improvement():
     models = ["MLP", "SVM", "LDA", "RF", "Ensemble"]
-    before = [0.731, 0.735, 0.729, 0.746, 0.754]
-    after  = [0.830, 0.810, 0.810, 0.831, 0.833]
-    before_std = [0.239, 0.222, 0.236, 0.229, 0.231]
-    after_std  = [0.132, 0.145, 0.155, 0.128, 0.140]
+    # 剃除前 = 全 18 人（train_update_all18.log）
+    before = [0.818, 0.818, 0.776, 0.819, 0.814]
+    before_std = [0.172, 0.179, 0.178, 0.176, 0.180]
+    # 剃除後 = 16 人，從 model_comparison_detail.csv 讀 Mean/Std 列
+    after, after_std = [], []
+    with open("model_comparison_detail.csv", encoding="utf-8") as f:
+        for r in csv.reader(f):
+            if r and r[0] == "Mean":
+                after = [float(x) for x in r[1:]]
+            elif r and r[0] == "Std":
+                after_std = [float(x) for x in r[1:]]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
     x = np.arange(len(models))
@@ -235,7 +245,7 @@ def fig_improvement():
     ax1.set_xticks(x); ax1.set_xticklabels(models)
     ax1.set_ylabel("LOSO 準確率")
     ax1.set_ylim(0, 1.15)
-    ax1.set_title("剃除 S08/S10 前後 — 平均準確率", fontsize=12)
+    ax1.set_title("剃除 S13/S14 前後 — 平均準確率", fontsize=12)
     ax1.legend(loc="lower right", framealpha=0.95)
 
     deltas = [a - b for a, b in zip(after, before)]
@@ -289,11 +299,12 @@ def fig_model_subject_heatmap():
 # ── 7. 訊號範例：好/壞受試者 raw waveform ─────────────────────────────────────
 def fig_signal_examples():
     fs = 512
+    DS = "bci_dataset_114-2_update/bci_dataset_114-2_any"
     cases = [
-        ("S09 - Blink (好)", "bci_dataset_114-2/S09/S09_3_5.txt", COL_OK),
-        ("S15 - Blink (好)", "bci_dataset_114-2/S15/S15_3_5.txt", COL_OK),
-        ("S08 - Relax (差，分不出 R/F)", "bci_dataset_114-2/S08/S08_1_5.txt", COL_BAD),
-        ("S10 - Blink (差，訊號失真)", "bci_dataset_114-2/S10/S10_3_5.txt", COL_BAD),
+        ("S12 - Blink (好，acc≈1.00)", f"{DS}/S12/S12_3_5.txt", COL_OK),
+        ("S15 - Blink (好，acc≈0.95)", f"{DS}/S15/S15_3_5.txt", COL_OK),
+        ("S13 - Blink (差，acc=0.33 亂猜)", f"{DS}/S13/S13_3_5.txt", COL_BAD),
+        ("S14 - Blink (差，acc<0.6)", f"{DS}/S14/S14_3_5.txt", COL_BAD),
     ]
     fig, axes = plt.subplots(4, 1, figsize=(13, 8), sharex=True)
     for ax, (title, fp, color) in zip(axes, cases):
@@ -430,7 +441,7 @@ def fig_features():
     fs = 512
     # 取 S15 一段眨眼當例子
     try:
-        d = np.loadtxt("bci_dataset_114-2/S15/S15_3_5.txt")[:fs*4]
+        d = np.loadtxt("bci_dataset_114-2_update/bci_dataset_114-2_any/S15/S15_3_5.txt")[:fs*4]
     except Exception:
         d = np.random.randn(fs*4) * 30
 
@@ -508,29 +519,74 @@ def fig_features():
     save(fig, "10_feature_engineering")
 
 
+# ── 11. 新舊資料集對比 ────────────────────────────────────────────────────────
+def fig_old_vs_new():
+    models = ["MLP", "SVM", "LDA", "RF", "Ensemble"]
+    # 全部用同一份程式碼跑出來的數字
+    old_all  = [0.731, 0.735, 0.729, 0.746, 0.754]
+    new_all  = [0.818, 0.818, 0.776, 0.819, 0.814]
+    old_cln  = [0.830, 0.810, 0.810, 0.831, 0.833]   # 舊排 S08/S10
+    new_cln  = [0.879, 0.876, 0.851, 0.868, 0.869]   # 新排 S13/S14
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    x = np.arange(len(models))
+    w = 0.38
+
+    # 左：全 18 人
+    ax1.bar(x - w/2, old_all, w, label="舊資料", color="#bbb", edgecolor="white")
+    ax1.bar(x + w/2, new_all, w, label="新資料", color="#4a90e2", edgecolor="white")
+    for i in range(len(models)):
+        ax1.text(i - w/2, old_all[i]+0.01, f"{old_all[i]:.2f}", ha="center", fontsize=8)
+        ax1.text(i + w/2, new_all[i]+0.01, f"{new_all[i]:.2f}", ha="center", fontsize=8, fontweight="bold")
+    ax1.set_xticks(x); ax1.set_xticklabels(models)
+    ax1.set_ylabel("LOSO 準確率"); ax1.set_ylim(0, 1.05)
+    ax1.set_title("全 18 人（未排除）", fontsize=12)
+    ax1.axhline(0.70, color=COL_BAD, ls="--", lw=1, alpha=0.5)
+    ax1.legend(loc="lower right", framealpha=0.95)
+
+    # 右：各自品質排除後
+    ax2.bar(x - w/2, old_cln, w, label="舊資料（排 S08/S10）", color="#bbb", edgecolor="white")
+    ax2.bar(x + w/2, new_cln, w, label="新資料（排 S13/S14）", color="#1ed760", edgecolor="white")
+    for i in range(len(models)):
+        ax2.text(i - w/2, old_cln[i]+0.01, f"{old_cln[i]:.2f}", ha="center", fontsize=8)
+        ax2.text(i + w/2, new_cln[i]+0.01, f"{new_cln[i]:.2f}", ha="center", fontsize=8, fontweight="bold")
+    ax2.set_xticks(x); ax2.set_xticklabels(models)
+    ax2.set_ylim(0, 1.05)
+    ax2.set_title("各自品質排除後（16 人）", fontsize=12)
+    ax2.axhline(0.70, color=COL_BAD, ls="--", lw=1, alpha=0.5)
+    ax2.legend(loc="lower right", framealpha=0.95)
+
+    fig.suptitle("新舊資料集訓練結果對比（同一程式碼）— 新資料全面提升 4~9%",
+                 y=1.02, fontsize=13, fontweight="bold")
+    fig.tight_layout()
+    save(fig, "11_old_vs_new_dataset")
+
+
 # ── 主程式 ───────────────────────────────────────────────────────────────────
 def main():
     print(f"輸出資料夾：{OUT}/\n")
-    print("[1/10] 模型比較長條圖")
+    print("[1/11] 模型比較長條圖")
     fig_model_comparison()
-    print("[2/10] 各受試者準確率")
+    print("[2/11] 各受試者準確率")
     fig_per_subject()
-    print("[3/10] 混淆矩陣熱圖")
+    print("[3/11] 混淆矩陣熱圖")
     fig_confusion_matrix()
-    print("[4/10] 好/壞受試者頻帶比較")
+    print("[4/11] 好/壞受試者頻帶比較")
     fig_band_comparison()
-    print("[5/10] 剃除前後改善")
+    print("[5/11] 剃除前後改善")
     fig_improvement()
-    print("[6/10] 各模型×各受試者熱圖")
+    print("[6/11] 各模型×各受試者熱圖")
     fig_model_subject_heatmap()
-    print("[7/10] 訊號範例波形")
+    print("[7/11] 訊號範例波形")
     fig_signal_examples()
-    print("[8/10] 系統架構流程圖")
+    print("[8/11] 系統架構流程圖")
     fig_architecture()
-    print("[9/10] 即時推論時序")
+    print("[9/11] 即時推論時序")
     fig_pipeline_timing()
-    print("[10/10] 特徵工程示意")
+    print("[10/11] 特徵工程示意")
     fig_features()
+    print("[11/11] 新舊資料集對比")
+    fig_old_vs_new()
     print(f"\n✅ 全部完成。共 {len(glob.glob(os.path.join(OUT, '*.png')))} 張 PNG"
           f" + {len(glob.glob(os.path.join(OUT, '*.pdf')))} 張 PDF")
 

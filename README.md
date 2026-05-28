@@ -14,7 +14,7 @@
 
 > ⚠️ 是「**快速反覆眨眼**」（像有東西飛來眼睛要連眨擋），不是「閉眼不動」。閉眼不動腦波是 alpha 波會被歸成 Relax 而非 Blink。
 
-模型：Ensemble (RandomForest + SVM + LDA)，16 受試者 LOSO 驗證 **83.3% ± 14.0%**。
+模型：MLP（更新版資料集 LOSO 最佳），16 受試者 LOSO 驗證 **87.9% ± 11.6%**。
 
 ---
 
@@ -24,8 +24,8 @@
 BrainLink Lite (Fp1, 512 Hz, BT)
     ↓
 Python 後端  (bci_server.py)
-    BrainFlow 串流 → 4s 滑動視窗 → 12 維特徵
-    → RobustScaler → Ensemble 推論
+    pyserial(TGAM) 串流 → 4s 滑動視窗 → 12 維特徵
+    → RobustScaler → MLP 推論
     → hysteresis 眨眼事件偵測
     → WebSocket 廣播 JSON
     ↓ ws://localhost:8765
@@ -88,7 +88,7 @@ python -X utf8 -u bci_server.py --source brainlink:COM3
 | `signal_sources.py` | 訊號輸入抽象（dummy / file / folder / brainflow）|
 | `probe_brainlink.py` | BrainLink 連線測試 |
 | `bci-ytm-extension/` | Chrome 擴充功能完整源碼 |
-| `bci_model.pkl` | 訓練好的 Ensemble 模型（45 MB）|
+| `bci_model.pkl` | 訓練好的 MLP 模型（0.2 MB）|
 | `requirements.txt` | Python 套件清單 |
 | `gui_preview.html` | 擴充功能 GUI 樣子預覽（不需要 server）|
 | `sample_data/` | 4 個範例 .txt（沒裝置時測 pipeline 用）|
@@ -97,35 +97,38 @@ python -X utf8 -u bci_server.py --source brainlink:COM3
 | 檔案 | 用途 |
 |---|---|
 | `train_compare.py` | 訓練 5 個模型 LOSO 比較 |
-| `save_best_model.py` | 用 16 位資料訓練 Ensemble，存成 .pkl |
-| `diagnose_subjects.py` | 受試者訊號品質診斷（找出該剃除哪幾位）|
-| `make_figures.py` | 產生簡報用所有圖表（matplotlib）|
+| `save_best_model.py` | 用 16 位資料訓練 MLP，存成 .pkl |
+| `diagnose_all_update.py` | 全受試者訊號品質診斷（找出該剃除哪幾位）|
+| `make_figures.py` | 產生簡報用所有圖表（11 張，matplotlib）|
 | `make_report.py` | 產生 HTML 進度報告 |
 
 ### 訓練結果（小檔，提供參考）
 | 檔案 | 內容 |
 |---|---|
 | `model_comparison_detail.csv` | 各模型對各受試者的 LOSO 準確率 |
-| `best_model_confusion_matrix.csv` | Ensemble 混淆矩陣 |
+| `best_model_confusion_matrix.csv` | 最佳模型（MLP）混淆矩陣 |
 
 ---
 
 ## 資料集
 
-`bci_dataset_114-2/` **沒有放在 repo 裡**（太大，160 MB+）。請從同學共享連結下載放到 repo 根目錄。
+更新版資料集 `bci_dataset_114-2_update/`（內含 `bci_dataset_114-2_any/S01..S18`）
+**沒有放在 repo 裡**（太大）。請從同學共享連結下載放到 repo 根目錄。
 要重新訓練模型才需要這個資料夾；只是要跑 demo 用 `sample_data/` 就夠了。
+
+`train_compare.py` 的 `Config.DATASET_PATH` 預設指向
+`bci_dataset_114-2_update/bci_dataset_114-2_any`。
 
 結構：
 ```
-bci_dataset_114-2/
-├── S01/
-│   ├── S01_1_1.txt   ← S01 的 Relax 第 1 試次
-│   ├── S01_1_2.txt
-│   ├── ...
-│   ├── S01_2_1.txt   ← Focus
-│   └── S01_3_1.txt   ← Blink
-├── S02/
-└── ... (S01-S18)
+bci_dataset_114-2_update/
+└── bci_dataset_114-2_any/
+    ├── S01/
+    │   ├── S01_1_1.txt   ← S01 的 Relax 第 1 試次
+    │   ├── S01_2_1.txt   ← Focus
+    │   └── S01_3_1.txt   ← Blink
+    ├── S02/
+    └── ... (S01-S18)
 ```
 每檔 = 20 秒、512 Hz、單通道 Fp1，共 10240 個浮點數。
 
@@ -134,45 +137,55 @@ bci_dataset_114-2/
 ## 重新訓練流程
 
 ```powershell
-# 1. 確認資料集放在 bci_dataset_114-2/
-# 2. 跑 LOSO 比較（約 10-15 分鐘）
+# 1. 確認資料集放在 bci_dataset_114-2_update/bci_dataset_114-2_any/
+# 2. 跑全受試者品質診斷，找出該排除誰
+python -X utf8 -u diagnose_all_update.py
+
+# 3. 跑 LOSO 比較（約 10-15 分鐘）
 python -X utf8 -u train_compare.py
 
-# 3. 用全部資料訓練最終 Ensemble + 存模型
+# 4. 用全部資料訓練最終 MLP + 存模型
 python -X utf8 -u save_best_model.py
 
-# 4.（選做）產生簡報用圖表
+# 5.（選做）產生簡報用圖表
 python -X utf8 -u make_figures.py
 ```
 
-要剃除某些受試者：改 `train_compare.py` 第 26 行 `EXCLUDED_SUBJECTS`。
+要剃除某些受試者：改 `train_compare.py` 的 `Config.EXCLUDED_SUBJECTS`。
 
 ---
 
-## 模型表現
+## 模型表現（更新版資料集，n=16）
 
 | 模型 | 平均準確率 | 標準差 |
 |---|---|---|
-| MLP | 0.830 | ±0.132 |
-| SVM (Linear) | 0.810 | ±0.145 |
-| LDA | 0.810 | ±0.155 |
-| RandomForest | 0.831 | ±0.128 |
-| **Ensemble (RF+SVM+LDA)** | **0.833** | **±0.140** |
+| **MLP** | **0.879** | **±0.116** |
+| SVM (Linear) | 0.876 | ±0.110 |
+| Ensemble (RF+SVM+LDA) | 0.869 | ±0.116 |
+| RandomForest | 0.868 | ±0.122 |
+| LDA | 0.851 | ±0.105 |
 
-LOSO Cross-Validation，n=16（剃除 S08 訊號分不開、S10 訊號失真）。
+LOSO Cross-Validation，剃除 S13（準確率=亂猜 0.33）與 S14（<0.6，三任務不可分）。
+> 註：更新版資料集較舊版整體提升 4~9%；最佳模型由 Ensemble 變成 MLP（且檔案從 45 MB 縮到 0.2 MB）。
+> S01/S06/S09 約 0.67 是因為其 Relax/Focus 腦波本身難分（Blink 仍正常），不影響眨眼控制。
 
 ---
 
 ## 開發筆記
 
-### 為什麼 1 次眨眼會被忽略？
-人平均每幾秒就會自然眨眼一次。如果單次眨眼就能觸發動作，使用者根本沒辦法正常看影片。所以系統用 **hysteresis state machine** 把連續的 Blink 預測合成「1 個眨眼事件」，並要求 **至少 2 個事件** 才執行動作。詳細邏輯在 `bci_server.py` 的 `infer_loop()`。
+### 為什麼用「連續眨眼時長」而不是「數眨眼次數」？
+模型的 4 秒視窗解析度太粗，分不出「眨 1 下 / 2 下 / 3 下」（全看成一段 Blink 狀態）。
+但它很穩定地能判斷「現在是不是處於連續眨眼狀態」。所以改成用 **hysteresis state machine**
+偵測「進入/離開連續眨眼」，依持續秒數分桶觸發動作（<1s 忽略、1-2.5s 暫停、2.5-5s 下一首、5-8s 上一首）。邏輯在 `bci_server.py` 的 `infer_loop()`。
 
-### 為什麼有 1.5 秒延遲？
-要區分「2 次 / 3 次 / 4 次」眨眼，系統必須等使用者「真的眨完了」才能算。`--burst-end-gap 1.5` 表示等 1.5 秒沒新眨眼才結算。可調短（更靈敏但容易把 2 次誤判 3 次）或調長。
+### 為什麼眨眼計數不用 raw 尖峰偵測？
+曾試過直接抓 raw 振幅尖峰，但一次眨眼有「閉+張」雙峰會被算成 2 下。改用模型 Blink
+probability + 時長分桶後，使用者只要「連續眨一段時間」就好，不必精準控制次數。
+（`RawBlinkDetector` 仍保留在 `signal_sources.py` 作為備案，目前未使用。）
 
-### 為什麼用 Ensemble 不直接用最快的 LDA？
-單模型差距 1-2% 看似不重要，但 Ensemble 在「最弱受試者」上的崩潰沒那麼嚴重（標準差最低之一）。實機 demo 時偶發性失敗會很尷尬，所以選穩定優先。
+### 為什麼部署 MLP？
+更新版資料集上 MLP LOSO 最高（0.879），且推論最快、檔案最小（0.2 MB vs Ensemble 45 MB）。
+舊資料集時是 Ensemble 略勝，換資料後 MLP 反超。
 
 ---
 
