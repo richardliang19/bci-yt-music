@@ -39,6 +39,23 @@ Chrome 擴充  (bci-ytm-extension/)
 
 ---
 
+## AI 教練（OpenAI，選用）
+
+overlay 內建「🧠 AI 教練」面板，由後端呼叫 OpenAI（gpt-4o-mini）：
+- **即時解讀**：每 20 秒把最近腦波狀態趨勢丟給 LLM，回一句中文回饋（「你已專注 8 分鐘，繼續保持」）
+- **Session 報告**：點「產生報告」→ LLM 分析整段 session → 專注度評分 + 總結/觀察/建議 + 下次歌單方向
+
+**啟用方式**（設環境變數即可，沒設就自動停用，其他功能照常）：
+```powershell
+$env:OPENAI_API_KEY = "sk-..."
+python -X utf8 -u bci_server.py --source brainlink:COM3 --insight-interval 20
+```
+
+API key 只讀環境變數，**不寫進任何程式碼、不上 git**。OpenAI 呼叫全在 Python 後端
+（避免 key 暴露在瀏覽器擴充原始碼）。成本：gpt-4o-mini 每次解讀/報告約 NT$0.1-1。
+
+---
+
 ## 快速開始（給組員）
 
 ### 1. 安裝環境
@@ -85,7 +102,8 @@ python -X utf8 -u bci_server.py --source brainlink:COM3
 | 檔案 | 用途 |
 |---|---|
 | `bci_server.py` | 主程式：腦波 → 推論 → WebSocket 廣播 |
-| `signal_sources.py` | 訊號輸入抽象（dummy / file / folder / brainflow）|
+| `signal_sources.py` | 訊號輸入抽象（dummy / file / folder / brainlink）|
+| `llm_coach.py` | OpenAI 即時解讀 + session 報告（選用，需 OPENAI_API_KEY）|
 | `probe_brainlink.py` | BrainLink 連線測試 |
 | `bci-ytm-extension/` | Chrome 擴充功能完整源碼 |
 | `bci_model.pkl` | 訓練好的 MLP 模型（0.2 MB）|

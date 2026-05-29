@@ -17,7 +17,9 @@ let ws = null;
 let reconnectTimer = null;
 let overlayEl = null;
 let toastEl = null;
+let reportModalEl = null;
 let recentEvents = [];
+let llmAvailable = false;
 
 // 預設 bucket，後端 status 訊息會覆蓋
 let buckets = [1.0, 2.5, 5.0, 8.0];
@@ -94,13 +96,35 @@ function buildOverlay() {
     </div>
 
     <div class="bci-events"></div>
+
+    <div class="bci-ai-section" id="bci-ai-section">
+      <div class="bci-ai-head">
+        <span class="bci-ai-title">🧠 AI 教練</span>
+        <button class="bci-ai-btn" id="bci-report-btn" disabled>產生報告</button>
+      </div>
+      <div class="bci-ai-insight" id="bci-ai-insight">等待 AI 即時解讀…</div>
+    </div>
   `;
   document.body.appendChild(overlayEl);
   if (!config.enabled) overlayEl.classList.add("bci-paused");
 
+  // 報告按鈕
+  overlayEl.querySelector("#bci-report-btn").addEventListener("click", () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "request_report" }));
+      showReportModal({ loading: true });
+    }
+  });
+
   toastEl = document.createElement("div");
   toastEl.id = "bci-toast";
   document.body.appendChild(toastEl);
+
+  // 報告 modal（預設隱藏）
+  reportModalEl = document.createElement("div");
+  reportModalEl.id = "bci-report-modal";
+  reportModalEl.style.display = "none";
+  document.body.appendChild(reportModalEl);
 }
 
 function connect() {
@@ -144,6 +168,70 @@ function handleMessage(msg) {
       updateBucketLabels();
     }
   }
+  if (msg.type === "llm_status") setLlmAvailable(msg.available);
+  if (msg.type === "llm_insight") showInsight(msg.text);
+  if (msg.type === "llm_report") showReportModal(msg);
+}
+
+function setLlmAvailable(available) {
+  llmAvailable = available;
+  const btn = document.getElementById("bci-report-btn");
+  const insightEl = document.getElementById("bci-ai-insight");
+  if (btn) btn.disabled = !available;
+  if (insightEl && !available) {
+    insightEl.textContent = "AI 教練未啟用（後端未設 OPENAI_API_KEY）";
+    insightEl.classList.add("bci-ai-off");
+  }
+}
+
+function showInsight(text) {
+  const el = document.getElementById("bci-ai-insight");
+  if (!el) return;
+  el.textContent = "💬 " + text;
+  el.classList.remove("bci-ai-off");
+  el.classList.add("bci-ai-flash");
+  setTimeout(() => el.classList.remove("bci-ai-flash"), 600);
+}
+
+function showReportModal(msg) {
+  if (!reportModalEl) return;
+  reportModalEl.style.display = "flex";
+  if (msg.loading) {
+    reportModalEl.innerHTML = `
+      <div class="bci-report-card">
+        <div class="bci-report-loading">🧠 AI 正在分析這次的腦波 session…</div>
+      </div>`;
+    return;
+  }
+  if (msg.error) {
+    reportModalEl.innerHTML = `
+      <div class="bci-report-card">
+        <button class="bci-report-close">×</button>
+        <div class="bci-report-err">${msg.error}</div>
+      </div>`;
+  } else {
+    const s = msg.stats || {};
+    const score = msg.focus_score ?? "—";
+    reportModalEl.innerHTML = `
+      <div class="bci-report-card">
+        <button class="bci-report-close">×</button>
+        <div class="bci-report-title">🧠 AI 專注力報告</div>
+        <div class="bci-report-score">
+          <div class="bci-score-num">${score}</div>
+          <div class="bci-score-label">專注度評分 / 100</div>
+        </div>
+        <div class="bci-report-row"><b>總結</b>${msg.summary || ""}</div>
+        <div class="bci-report-row"><b>觀察</b>${msg.observation || ""}</div>
+        <div class="bci-report-row bci-report-sug"><b>建議</b>${msg.suggestion || ""}</div>
+        <div class="bci-report-meta">
+          時長 ${s.duration_min ?? "?"} 分 ·
+          Focus ${Math.round((s.focus_pct ?? 0)*100)}% ·
+          操作 ▶${s.n_play_pause ?? 0} ⏭${s.n_next ?? 0} ⏮${s.n_prev ?? 0}
+        </div>
+      </div>`;
+  }
+  const close = reportModalEl.querySelector(".bci-report-close");
+  if (close) close.addEventListener("click", () => { reportModalEl.style.display = "none"; });
 }
 
 function updateBucketLabels() {

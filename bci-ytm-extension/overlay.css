@@ -215,3 +215,131 @@
   opacity: 1;
   transform: translateX(-50%) translateY(-8px);
 }
+
+/* ── AI 教練面板 ─────────────────────────────────────────── */
+#bci-overlay .bci-ai-section {
+  margin-top: 10px;
+  padding: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(135deg, rgba(124,77,255,0.12), rgba(30,215,96,0.06));
+  border-radius: 8px;
+}
+#bci-overlay .bci-ai-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+#bci-overlay .bci-ai-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #b388ff;
+}
+#bci-overlay .bci-ai-btn {
+  background: #7c4dff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#bci-overlay .bci-ai-btn:hover:not(:disabled) { background: #6a3df0; }
+#bci-overlay .bci-ai-btn:disabled { background: #444; color: #888; cursor: not-allowed; }
+#bci-overlay .bci-ai-insight {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #ddd;
+  min-height: 32px;
+  transition: color 0.3s;
+}
+#bci-overlay .bci-ai-insight.bci-ai-off { color: #777; font-style: italic; }
+#bci-overlay .bci-ai-insight.bci-ai-flash { color: #1ed760; }
+
+/* ── AI 報告 modal ───────────────────────────────────────── */
+#bci-report-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 100001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+#bci-report-modal .bci-report-card {
+  position: relative;
+  width: 420px;
+  max-width: 90vw;
+  background: #1a1a1a;
+  border: 1px solid rgba(124,77,255,0.4);
+  border-radius: 14px;
+  padding: 24px;
+  color: #eee;
+  font-family: 'Roboto', -apple-system, sans-serif;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+#bci-report-modal .bci-report-close {
+  position: absolute;
+  top: 12px; right: 14px;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+}
+#bci-report-modal .bci-report-close:hover { color: #fff; }
+#bci-report-modal .bci-report-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #b388ff;
+  margin-bottom: 16px;
+}
+#bci-report-modal .bci-report-score {
+  text-align: center;
+  margin: 12px 0 18px;
+}
+#bci-report-modal .bci-score-num {
+  font-size: 52px;
+  font-weight: 800;
+  color: #1ed760;
+  line-height: 1;
+}
+#bci-report-modal .bci-score-label { font-size: 12px; color: #999; margin-top: 4px; }
+#bci-report-modal .bci-report-row {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 10px 0;
+  padding-left: 8px;
+  border-left: 2px solid rgba(124,77,255,0.4);
+}
+#bci-report-modal .bci-report-row b {
+  display: inline-block;
+  color: #b388ff;
+  margin-right: 8px;
+  min-width: 36px;
+}
+#bci-report-modal .bci-report-sug { border-left-color: #1ed760; }
+#bci-report-modal .bci-report-sug b { color: #1ed760; }
+#bci-report-modal .bci-report-meta {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 11px;
+  color: #888;
+  text-align: center;
+}
+#bci-report-modal .bci-report-loading {
+  text-align: center;
+  font-size: 14px;
+  color: #b388ff;
+  padding: 20px;
+}
+#bci-report-modal .bci-report-err {
+  text-align: center;
+  color: #ff7070;
+  padding: 16px;
+}

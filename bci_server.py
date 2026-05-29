@@ -47,10 +47,18 @@ except ImportError:
 
 from train_compare import extract_features
 from signal_sources import make_source
+import llm_coach
 
 
 CLIENTS = set()
 LAST_STATUS = None
+
+# session 累積資料（給 LLM 用）
+SESSION = {
+    "start": None,
+    "samples": [],   # 每次推論一筆 (t, relax, focus, blink, pred)
+    "actions": [],   # 觸發動作 (t, action, hold_duration)
+}
 
 
 async def broadcast(msg: dict):
@@ -73,13 +81,110 @@ async def handler(ws):
     try:
         if LAST_STATUS:
             await ws.send(json.dumps(LAST_STATUS, ensure_ascii=False))
-        async for _ in ws:
-            pass
+        # 告知前端 LLM 是否可用
+        await ws.send(json.dumps(
+            {"type": "llm_status", "available": llm_coach.is_available()},
+            ensure_ascii=False))
+        async for raw in ws:
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                continue
+            if msg.get("type") == "request_report":
+                asyncio.create_task(generate_report())
     except Exception:
         pass
     finally:
         CLIENTS.discard(ws)
         print(f"[WS] client 斷開，剩 {len(CLIENTS)} 個")
+
+
+# ── LLM 整合 ──────────────────────────────────────────────────────────────────
+def _window_stats(window_sec=30.0):
+    """取最近 window_sec 秒的統計，給 insight 用"""
+    if not SESSION["samples"]:
+        return None
+    now = SESSION["samples"][-1][0]
+    win = [s for s in SESSION["samples"] if now - s[0] <= window_sec]
+    if len(win) < 4:
+        return None
+    arr = np.array([[s[1], s[2], s[3]] for s in win])
+    mean = arr.mean(axis=0)
+    # focus 趨勢：前半 vs 後半
+    half = len(win) // 2
+    f_first = np.mean([s[2] for s in win[:half]])
+    f_last = np.mean([s[2] for s in win[half:]])
+    trend = "上升" if f_last > f_first + 0.05 else ("下降" if f_last < f_first - 0.05 else "持平")
+    recent_actions = [a[1] for a in SESSION["actions"] if now - a[0] <= window_sec]
+    labels = ["Relax", "Focus", "Blink"]
+    return {
+        "window_sec": window_sec,
+        "relax_pct": round(float(mean[0]), 2),
+        "focus_pct": round(float(mean[1]), 2),
+        "blink_pct": round(float(mean[2]), 2),
+        "dominant": labels[int(np.argmax(mean))],
+        "focus_trend": trend,
+        "actions": recent_actions,
+    }
+
+
+def _session_stats():
+    """整段 session 統計，給 report 用"""
+    if not SESSION["samples"] or SESSION["start"] is None:
+        return None
+    samples = SESSION["samples"]
+    dur_min = (samples[-1][0] - SESSION["start"]) / 60.0
+    arr = np.array([[s[1], s[2], s[3]] for s in samples])
+    mean = arr.mean(axis=0)
+    labels = ["Relax", "Focus", "Blink"]
+    # 每分鐘主導狀態 timeline
+    timeline = []
+    bucket = {}
+    for t, r, f, b, pred in samples:
+        m = int((t - SESSION["start"]) // 60)
+        bucket.setdefault(m, []).append((r, f, b))
+    for m in sorted(bucket):
+        bm = np.array(bucket[m]).mean(axis=0)
+        timeline.append({"min": m, "dominant": labels[int(np.argmax(bm))],
+                         "focus": round(float(bm[1]), 2)})
+    acts = [a[1] for a in SESSION["actions"]]
+    return {
+        "duration_min": round(dur_min, 1),
+        "relax_pct": round(float(mean[0]), 2),
+        "focus_pct": round(float(mean[1]), 2),
+        "blink_pct": round(float(mean[2]), 2),
+        "timeline": timeline,
+        "n_play_pause": acts.count("play_pause"),
+        "n_next": acts.count("next"),
+        "n_prev": acts.count("prev"),
+    }
+
+
+async def generate_insight():
+    stats = _window_stats()
+    if stats is None:
+        return
+    text = await llm_coach.insight(stats)
+    if text:
+        await broadcast({"type": "llm_insight", "ts": SESSION["samples"][-1][0],
+                         "text": text})
+        print(f"  [AI] {text}")
+
+
+async def generate_report():
+    stats = _session_stats()
+    if stats is None:
+        await broadcast({"type": "llm_report", "error": "資料不足，先用一陣子再產生報告"})
+        return
+    print("  [AI] 產生 session 報告中…")
+    rep = await llm_coach.report(stats)
+    if rep:
+        rep["type"] = "llm_report"
+        rep["stats"] = stats
+        await broadcast(rep)
+        print(f"  [AI] 報告完成（focus_score={rep.get('focus_score')}）")
+    else:
+        await broadcast({"type": "llm_report", "error": "LLM 不可用或呼叫失敗"})
 
 
 def action_for_duration(d, b1, b2, b3, bmax):
@@ -127,8 +232,16 @@ async def infer_loop(args):
     blink_start_t = None
     last_pred_t = 0.0
     last_action_t = 0.0
+    last_insight_t = 0.0
+
+    # 重置 session
+    SESSION["start"] = None
+    SESSION["samples"] = []
+    SESSION["actions"] = []
 
     print(f"開始推論（每 {args.step}s 一次，平滑 {args.smooth}）")
+    print(f"AI 教練：{'啟用' if llm_coach.is_available() else '停用（沒裝 openai 或沒設 OPENAI_API_KEY）'}"
+          f"  即時解讀間隔 {args.insight_interval}s")
     print(f"門檻：enter={args.enter_thresh}  exit={args.exit_thresh}")
     print(f"Bucket：忽略 < {args.bucket_1}s ≤ play_pause < {args.bucket_2}s "
           f"≤ next < {args.bucket_3}s ≤ prev < {args.bucket_max}s ≤ 忽略")
@@ -208,6 +321,20 @@ async def infer_loop(args):
                         "hold_duration": fired_duration,
                     })
 
+                # ── 累積 session 資料（給 AI 教練）─────────────
+                if SESSION["start"] is None:
+                    SESSION["start"] = now
+                SESSION["samples"].append((now, float(avg[0]), float(avg[1]), blink_p, pred))
+                if fired_action is not None:
+                    SESSION["actions"].append((now, fired_action, fired_duration))
+
+                # 定時即時解讀（fire-and-forget，不阻塞推論）
+                if (llm_coach.is_available()
+                        and (now - last_insight_t) >= args.insight_interval
+                        and (now - SESSION["start"]) >= args.insight_interval):
+                    last_insight_t = now
+                    asyncio.create_task(generate_insight())
+
                 hold_str = f"hold={hold_duration:.1f}s" if is_blinking else ""
                 print(f"[{time.strftime('%H:%M:%S')}] R={avg[0]:.2f} F={avg[1]:.2f} "
                       f"B={blink_p:.2f} → {labels[pred]} {hold_str}")
@@ -264,6 +391,10 @@ def main():
 
     ap.add_argument("--action-cooldown", type=float, default=1.5,
                     help="動作觸發後冷卻秒數（預設 1.5）")
+
+    # AI 教練
+    ap.add_argument("--insight-interval", type=float, default=20.0,
+                    help="AI 即時解讀間隔秒（預設 20；需設 OPENAI_API_KEY）")
 
     args = ap.parse_args()
 

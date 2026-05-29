@@ -287,9 +287,47 @@
   </div>
 
   <div class="bci-events" id="events"></div>
+
+  <div style="margin-top:10px;padding:10px;border-top:1px solid rgba(255,255,255,0.06);
+              background:linear-gradient(135deg,rgba(124,77,255,0.12),rgba(30,215,96,0.06));
+              border-radius:8px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <span style="font-size:12px;font-weight:700;color:#b388ff;">🧠 AI 教練</span>
+      <button onclick="document.getElementById('demo-report').style.display='flex'"
+              style="background:#7c4dff;color:#fff;border:none;border-radius:6px;
+                     padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">產生報告</button>
+    </div>
+    <div style="font-size:12px;line-height:1.5;color:#1ed760;">💬 你的專注力很穩定，已經維持 8 分鐘，繼續保持！</div>
+  </div>
 </div>
 
 <div id="bci-toast" style="display:none">✓ 播放/暫停</div>
+
+<!-- AI 報告 modal（demo 截圖用，點「產生報告」顯示）-->
+<div id="demo-report" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);
+     z-index:100001;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+  <div style="position:relative;width:420px;max-width:90vw;background:#1a1a1a;
+       border:1px solid rgba(124,77,255,0.4);border-radius:14px;padding:24px;color:#eee;
+       font-family:'Roboto',sans-serif;box-shadow:0 8px 40px rgba(0,0,0,0.6);">
+    <button onclick="document.getElementById('demo-report').style.display='none'"
+            style="position:absolute;top:12px;right:14px;background:transparent;border:none;
+                   color:#888;font-size:22px;cursor:pointer;line-height:1;">×</button>
+    <div style="font-size:16px;font-weight:700;color:#b388ff;margin-bottom:16px;">🧠 AI 專注力報告</div>
+    <div style="text-align:center;margin:12px 0 18px;">
+      <div style="font-size:52px;font-weight:800;color:#1ed760;line-height:1;">78</div>
+      <div style="font-size:12px;color:#999;margin-top:4px;">專注度評分 / 100</div>
+    </div>
+    <div style="font-size:13px;line-height:1.6;margin:10px 0;padding-left:8px;border-left:2px solid rgba(124,77,255,0.4);">
+      <b style="display:inline-block;color:#b388ff;margin-right:8px;min-width:36px;">總結</b>這次專注表現良好，整體狀態穩定。</div>
+    <div style="font-size:13px;line-height:1.6;margin:10px 0;padding-left:8px;border-left:2px solid rgba(124,77,255,0.4);">
+      <b style="display:inline-block;color:#b388ff;margin-right:8px;min-width:36px;">觀察</b>第 5-8 分鐘專注度最高，跳歌後曾短暫下降。</div>
+    <div style="font-size:13px;line-height:1.6;margin:10px 0;padding-left:8px;border-left:2px solid #1ed760;">
+      <b style="display:inline-block;color:#1ed760;margin-right:8px;min-width:36px;">建議</b>下次可嘗試 lo-fi 或古典樂，減少帶歌詞的歌曲以維持專注。</div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08);
+                font-size:11px;color:#888;text-align:center;">
+      時長 12.5 分 · Focus 68% · 操作 ▶2 ⏭3 ⏮1</div>
+  </div>
+</div>
 
 <script>
 const SCENARIOS = {
