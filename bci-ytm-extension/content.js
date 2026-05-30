@@ -5,11 +5,35 @@
 // 3. 收到 action → 直接 click YT Music 頁面播放鈕
 // 動作對應（依「連續快速眨眼」的持續時間）：
 //   <1s = 忽略   1-2.5s = 播放/暫停   2.5-5s = 下一首   5-8s = 上一首
+//
+// 情境模式（兩個分支，皆在擴充內執行，讀後端 proba 串流判斷）：
+//   過濾模式：目標狀態(專注/放鬆)持續偏離 → 自動跳下一首
+//   歌單庫模式：偵測到穩定情境 → 自動切到該情境歌單（隨機挑）
+//   兩者都可用下方手動按鈕直接切歌單。歌單 URL 在 PLAYLISTS 設定。
 // ──────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG = {
   wsUrl: "ws://localhost:8765",
   enabled: true,
+};
+
+// ── 情境式歌單設定（在這裡填你的 YT Music 歌單連結）────────────
+// 每個情境可放多個歌單 URL，歌單庫模式會隨機挑一個。
+const PLAYLISTS = {
+  focus: [
+    // 例： "https://music.youtube.com/playlist?list=PLxxxxxxxx",
+    "https://music.youtube.com/playlist?list=RDCLAK5uy_kmPRjHDECIcGm4Dy9bdF7AmRR_5T6QHfg",
+  ],
+  relax: [
+    "https://music.youtube.com/playlist?list=RDCLAK5uy_kLWIr9gv1XLlPbaDS965-Db4TrBoUTxQ8",
+  ],
+};
+
+// 情境模式參數（秒）
+const SCENARIO = {
+  mismatchSec: 8,    // 過濾模式：偏離目標狀態持續幾秒就跳下一首
+  switchSec: 20,     // 歌單庫模式：狀態穩定幾秒就切該情境歌單
+  cooldownSec: 15,   // 切歌單/跳歌後冷卻，避免狂切
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -20,6 +44,13 @@ let toastEl = null;
 let reportModalEl = null;
 let recentEvents = [];
 let llmAvailable = false;
+
+// 情境模式狀態
+let scenarioMode = "off";       // "off" | "filter" | "library"
+let targetState = "focus";      // "focus" | "relax"
+let probaWindow = [];           // 最近 proba 樣本 [{t, relax, focus}]
+let lastScenarioAction = 0;     // 上次切歌/跳歌時間戳(ms)
+let lastLibrarySwitch = "";     // 上次切到的情境，避免重複切
 
 // 預設 bucket，後端 status 訊息會覆蓋
 let buckets = [1.0, 2.5, 5.0, 8.0];
@@ -97,6 +128,27 @@ function buildOverlay() {
 
     <div class="bci-events"></div>
 
+    <div class="bci-scenario-section">
+      <div class="bci-scenario-head">
+        <span class="bci-scenario-title">🎵 情境模式</span>
+        <span class="bci-scenario-status" id="bci-scenario-status">關閉</span>
+      </div>
+      <div class="bci-seg" id="bci-mode-seg">
+        <button data-mode="off" class="bci-seg-btn bci-seg-on">關閉</button>
+        <button data-mode="filter" class="bci-seg-btn">過濾</button>
+        <button data-mode="library" class="bci-seg-btn">歌單庫</button>
+      </div>
+      <div class="bci-seg" id="bci-target-seg">
+        <span class="bci-seg-label">目標</span>
+        <button data-target="focus" class="bci-seg-btn bci-seg-on">專注</button>
+        <button data-target="relax" class="bci-seg-btn">放鬆</button>
+      </div>
+      <div class="bci-scenario-manual">
+        <button class="bci-manual-btn" data-pl="focus">▶ 專注歌單</button>
+        <button class="bci-manual-btn" data-pl="relax">▶ 放鬆歌單</button>
+      </div>
+    </div>
+
     <div class="bci-ai-section" id="bci-ai-section">
       <div class="bci-ai-head">
         <span class="bci-ai-title">🧠 AI 教練</span>
@@ -114,6 +166,32 @@ function buildOverlay() {
       ws.send(JSON.stringify({ type: "request_report" }));
       showReportModal({ loading: true });
     }
+  });
+
+  // 情境模式切換
+  overlayEl.querySelectorAll("#bci-mode-seg .bci-seg-btn").forEach((b) => {
+    b.addEventListener("click", () => {
+      scenarioMode = b.dataset.mode;
+      probaWindow = []; lastLibrarySwitch = ""; lastScenarioAction = 0;
+      overlayEl.querySelectorAll("#bci-mode-seg .bci-seg-btn")
+        .forEach((x) => x.classList.toggle("bci-seg-on", x === b));
+      const st = document.getElementById("bci-scenario-status");
+      st.textContent = scenarioMode === "off" ? "關閉"
+        : scenarioMode === "filter" ? "過濾模式啟動" : "歌單庫模式啟動";
+    });
+  });
+  // 目標狀態切換
+  overlayEl.querySelectorAll("#bci-target-seg .bci-seg-btn").forEach((b) => {
+    b.addEventListener("click", () => {
+      targetState = b.dataset.target;
+      probaWindow = [];
+      overlayEl.querySelectorAll("#bci-target-seg .bci-seg-btn")
+        .forEach((x) => x.classList.toggle("bci-seg-on", x === b));
+    });
+  });
+  // 手動切歌單按鈕
+  overlayEl.querySelectorAll(".bci-manual-btn").forEach((b) => {
+    b.addEventListener("click", () => switchToPlaylist(b.dataset.pl));
   });
 
   toastEl = document.createElement("div");
@@ -280,6 +358,82 @@ function updateProba(msg) {
   buckEls.forEach((el, i) => {
     el.classList.toggle("bci-bucket-active", i === activeIdx);
   });
+
+  // ── 情境模式：累積狀態並評估 ───────────────────────────
+  evaluateScenario(msg);
+}
+
+// ── 情境式歌單切換邏輯 ──────────────────────────────────────
+function evaluateScenario(msg) {
+  if (scenarioMode === "off") return;
+  // 眨眼當下不納入狀態判斷（眨眼會污染 Focus/Relax 判讀）
+  if (msg.is_blinking) return;
+
+  const now = Date.now();
+  probaWindow.push({ t: now, relax: msg.relax, focus: msg.focus });
+  probaWindow = probaWindow.filter((s) => now - s.t <= 30000);
+
+  const statusEl = document.getElementById("bci-scenario-status");
+  const cooldownLeft = SCENARIO.cooldownSec * 1000 - (now - lastScenarioAction);
+  if (lastScenarioAction && cooldownLeft > 0) {
+    if (statusEl) statusEl.textContent = `冷卻中…${Math.ceil(cooldownLeft / 1000)}s`;
+    return;
+  }
+
+  if (scenarioMode === "filter") {
+    const winMs = SCENARIO.mismatchSec * 1000;
+    const recent = probaWindow.filter((s) => now - s.t <= winMs);
+    if (recent.length < 4 || (now - recent[0].t) < winMs * 0.8) {
+      if (statusEl) statusEl.textContent = "觀察中…";
+      return;
+    }
+    const avgTarget = recent.reduce((a, s) => a + s[targetState], 0) / recent.length;
+    const tName = targetState === "focus" ? "專注" : "放鬆";
+    if (avgTarget < 0.4) {
+      doAction("next");
+      showToast(`🎯 這首沒讓你${tName} → 跳下一首`);
+      pushEvent(`過濾跳歌`, `${(avgTarget*100).toFixed(0)}%`);
+      lastScenarioAction = now;
+      probaWindow = [];
+      if (statusEl) statusEl.textContent = `已跳歌（${tName}度 ${(avgTarget*100).toFixed(0)}%）`;
+    } else if (statusEl) {
+      statusEl.textContent = `${tName}度 ${(avgTarget*100).toFixed(0)}%（保留）`;
+    }
+  } else if (scenarioMode === "library") {
+    const winMs = SCENARIO.switchSec * 1000;
+    const recent = probaWindow.filter((s) => now - s.t <= winMs);
+    if (recent.length < 6 || (now - recent[0].t) < winMs * 0.8) {
+      if (statusEl) statusEl.textContent = "判讀情境中…";
+      return;
+    }
+    const avgFocus = recent.reduce((a, s) => a + s.focus, 0) / recent.length;
+    const avgRelax = recent.reduce((a, s) => a + s.relax, 0) / recent.length;
+    let detected = null;
+    if (avgFocus > 0.55) detected = "focus";
+    else if (avgRelax > 0.55) detected = "relax";
+    if (detected && detected !== lastLibrarySwitch) {
+      switchToPlaylist(detected);
+      lastLibrarySwitch = detected;
+      lastScenarioAction = now;
+      probaWindow = [];
+    } else if (statusEl) {
+      const dn = detected === "focus" ? "專注" : detected === "relax" ? "放鬆" : "判讀中";
+      statusEl.textContent = `情境：${dn}`;
+    }
+  }
+}
+
+function switchToPlaylist(state) {
+  const list = PLAYLISTS[state] || [];
+  const name = state === "focus" ? "專注" : "放鬆";
+  if (list.length === 0) {
+    showToast(`⚠ 沒設定${name}歌單（content.js PLAYLISTS）`);
+    return;
+  }
+  const url = list[Math.floor(Math.random() * list.length)];
+  showToast(`🎵 切換${name}歌單`);
+  pushEvent(`切${name}歌單`, "");
+  window.location.href = url;  // 同分頁導航，會自動開始播放
 }
 
 function doAction(action, holdDuration) {

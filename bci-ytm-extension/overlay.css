@@ -216,6 +216,77 @@
   transform: translateX(-50%) translateY(-8px);
 }
 
+/* ── 情境模式面板 ────────────────────────────────────────── */
+#bci-overlay .bci-scenario-section {
+  margin-top: 10px;
+  padding: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(74, 144, 226, 0.06);
+  border-radius: 8px;
+}
+#bci-overlay .bci-scenario-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+#bci-overlay .bci-scenario-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #5fa8ff;
+}
+#bci-overlay .bci-scenario-status {
+  font-size: 11px;
+  color: #aaa;
+  font-variant-numeric: tabular-nums;
+}
+#bci-overlay .bci-seg {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+#bci-overlay .bci-seg-label {
+  font-size: 11px;
+  color: #888;
+  margin-right: 4px;
+}
+#bci-overlay .bci-seg-btn {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  color: #bbb;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 5px 0;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+#bci-overlay .bci-seg-btn:hover { background: rgba(255, 255, 255, 0.12); }
+#bci-overlay .bci-seg-btn.bci-seg-on {
+  background: #4a90e2;
+  color: #fff;
+  border-color: #4a90e2;
+}
+#bci-overlay .bci-scenario-manual {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+#bci-overlay .bci-manual-btn {
+  flex: 1;
+  background: transparent;
+  color: #5fa8ff;
+  border: 1px dashed rgba(95, 168, 255, 0.4);
+  border-radius: 6px;
+  padding: 5px 0;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+#bci-overlay .bci-manual-btn:hover { background: rgba(95, 168, 255, 0.12); }
+
 /* ── AI 教練面板 ─────────────────────────────────────────── */
 #bci-overlay .bci-ai-section {
   margin-top: 10px;
