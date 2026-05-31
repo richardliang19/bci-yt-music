@@ -44,3 +44,6 @@ handoff/
 *.tmp
 *.bak
 *.zip
+
+# runtime 產生的搜尋快取（每人不同，不上 git）
+music_search_cache.json

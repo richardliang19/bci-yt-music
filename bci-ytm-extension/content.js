@@ -4,12 +4,9 @@
 // 2. 注入浮動 overlay 顯示機率條 + 連續眨眼持續時間
 // 3. 收到 action → 直接 click YT Music 頁面播放鈕
 // 動作對應（依「連續快速眨眼」的持續時間）：
-//   <1s = 忽略   1-2.5s = 播放/暫停   2.5-5s = 下一首   5-8s = 上一首
+//   <2s = 忽略   2-4s = 播放/暫停   4-6.5s = 下一首   6.5-9s = 上一首
 //
-// 情境模式（兩個分支，皆在擴充內執行，讀後端 proba 串流判斷）：
-//   過濾模式：目標狀態(專注/放鬆)持續偏離 → 自動跳下一首
-//   歌單庫模式：偵測到穩定情境 → 自動切到該情境歌單（隨機挑）
-//   兩者都可用下方手動按鈕直接切歌單。歌單 URL 在 PLAYLISTS 設定。
+// 混合歌單過濾：一段時間內多數樣本偏離目標狀態(專注/放鬆) → 自動跳下一首
 // ──────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG = {
@@ -17,23 +14,12 @@ const DEFAULT_CONFIG = {
   enabled: true,
 };
 
-// ── 情境式歌單設定（在這裡填你的 YT Music 歌單連結）────────────
-// 每個情境可放多個歌單 URL，歌單庫模式會隨機挑一個。
-const PLAYLISTS = {
-  focus: [
-    // 例： "https://music.youtube.com/playlist?list=PLxxxxxxxx",
-    "https://music.youtube.com/playlist?list=RDCLAK5uy_kmPRjHDECIcGm4Dy9bdF7AmRR_5T6QHfg",
-  ],
-  relax: [
-    "https://music.youtube.com/playlist?list=RDCLAK5uy_kLWIr9gv1XLlPbaDS965-Db4TrBoUTxQ8",
-  ],
-};
-
-// 情境模式參數（秒）
+// 混合歌單過濾參數（秒）
 const SCENARIO = {
-  mismatchSec: 8,    // 過濾模式：偏離目標狀態持續幾秒就跳下一首
-  switchSec: 20,     // 歌單庫模式：狀態穩定幾秒就切該情境歌單
-  cooldownSec: 15,   // 切歌單/跳歌後冷卻，避免狂切
+  mismatchSec: 20,      // 觀察最近幾秒的有效樣本
+  targetFloor: 0.40,    // 目標狀態低於此機率視為不符合
+  mismatchRatio: 0.70,  // 不符合樣本比例達到此值才跳下一首
+  cooldownSec: 20,      // 跳歌後冷卻，避免狂切
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -44,16 +30,20 @@ let toastEl = null;
 let reportModalEl = null;
 let recentEvents = [];
 let llmAvailable = false;
+let audioCtx = null;
+let isCalibrating = false;
+let trackTimer = null;
+let lastTrackKey = "";
+let overlayCollapsed = localStorage.getItem("bciOverlayCollapsed") === "1";
 
-// 情境模式狀態
-let scenarioMode = "off";       // "off" | "filter" | "library"
+// 混合歌單過濾狀態
+let scenarioMode = "off";       // "off" | "filter"
 let targetState = "focus";      // "focus" | "relax"
 let probaWindow = [];           // 最近 proba 樣本 [{t, relax, focus}]
-let lastScenarioAction = 0;     // 上次切歌/跳歌時間戳(ms)
-let lastLibrarySwitch = "";     // 上次切到的情境，避免重複切
+let lastScenarioAction = 0;     // 上次跳歌時間戳(ms)
 
 // 預設 bucket，後端 status 訊息會覆蓋
-let buckets = [1.0, 2.5, 5.0, 8.0];
+let buckets = [2.0, 4.0, 6.5, 9.0];
 
 const ACTION_NAMES = {
   play_pause: "播放/暫停",
@@ -70,6 +60,7 @@ chrome.storage.onChanged.addListener((changes) => {
   for (const [k, v] of Object.entries(changes)) config[k] = v.newValue;
   if (changes.wsUrl && ws) { try { ws.close(); } catch (_) {} }
   if ("enabled" in changes) {
+    playCue("mode");
     overlayEl?.classList.toggle("bci-paused", !config.enabled);
   }
 });
@@ -77,6 +68,7 @@ chrome.storage.onChanged.addListener((changes) => {
 function init() {
   buildOverlay();
   connect();
+  if (!trackTimer) trackTimer = setInterval(() => sendTrackUpdate(false), 5000);
 }
 
 function buildOverlay() {
@@ -85,11 +77,12 @@ function buildOverlay() {
   overlayEl.id = "bci-overlay";
   overlayEl.innerHTML = `
     <header>
-      <span>BCI Controller</span>
+      <span class="bci-title">BCI Controller</span>
       <span class="bci-status">
         <span class="bci-led bci-off"></span>
         <span class="bci-status-text">未連線</span>
       </span>
+      <button class="bci-collapse-btn" id="bci-collapse-btn" title="收合/展開">−</button>
     </header>
 
     <div class="bci-bar-row">
@@ -108,11 +101,18 @@ function buildOverlay() {
       <span class="bci-bar-pct">0%</span>
     </div>
 
+    <div class="bci-calibration" id="bci-calibration" style="display:none">
+      <div class="bci-cal-title">個人化校正</div>
+      <div class="bci-cal-text" id="bci-cal-text">請連續快速眨眼 5 秒</div>
+      <div class="bci-cal-track"><div class="bci-cal-fill" id="bci-cal-fill"></div></div>
+    </div>
+
     <div class="bci-hold-section">
       <div class="bci-hold-row">
         <span class="bci-label">連續眨眼時長</span>
         <span class="bci-hold-time" id="bci-hold-time">0.0s</span>
       </div>
+      <button class="bci-calibrate-btn" id="bci-calibrate-btn">手動校正</button>
       <div class="bci-bucket-bar" id="bci-bucket-bar">
         <div class="bci-bucket bci-bucket-ignore" data-bucket="0"><span>忽略</span></div>
         <div class="bci-bucket bci-bucket-pp"     data-bucket="1"><span>▶❚❚</span></div>
@@ -130,22 +130,17 @@ function buildOverlay() {
 
     <div class="bci-scenario-section">
       <div class="bci-scenario-head">
-        <span class="bci-scenario-title">🎵 情境模式</span>
+        <span class="bci-scenario-title">🎵 混合歌單過濾</span>
         <span class="bci-scenario-status" id="bci-scenario-status">關閉</span>
       </div>
       <div class="bci-seg" id="bci-mode-seg">
         <button data-mode="off" class="bci-seg-btn bci-seg-on">關閉</button>
         <button data-mode="filter" class="bci-seg-btn">過濾</button>
-        <button data-mode="library" class="bci-seg-btn">歌單庫</button>
       </div>
       <div class="bci-seg" id="bci-target-seg">
         <span class="bci-seg-label">目標</span>
         <button data-target="focus" class="bci-seg-btn bci-seg-on">專注</button>
         <button data-target="relax" class="bci-seg-btn">放鬆</button>
-      </div>
-      <div class="bci-scenario-manual">
-        <button class="bci-manual-btn" data-pl="focus">▶ 專注歌單</button>
-        <button class="bci-manual-btn" data-pl="relax">▶ 放鬆歌單</button>
       </div>
     </div>
 
@@ -159,8 +154,13 @@ function buildOverlay() {
   `;
   document.body.appendChild(overlayEl);
   if (!config.enabled) overlayEl.classList.add("bci-paused");
+  setOverlayCollapsed(overlayCollapsed);
 
   // 報告按鈕
+  overlayEl.querySelector("#bci-collapse-btn").addEventListener("click", () => {
+    setOverlayCollapsed(!overlayCollapsed);
+  });
+
   overlayEl.querySelector("#bci-report-btn").addEventListener("click", () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "request_report" }));
@@ -169,15 +169,26 @@ function buildOverlay() {
   });
 
   // 情境模式切換
+  overlayEl.querySelector("#bci-calibrate-btn").addEventListener("click", () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      isCalibrating = true;
+      playCue("calibration");
+      ws.send(JSON.stringify({ type: "request_calibration" }));
+    } else {
+      showToast("後端未連線，無法校正");
+      playCue("error");
+    }
+  });
+
   overlayEl.querySelectorAll("#bci-mode-seg .bci-seg-btn").forEach((b) => {
     b.addEventListener("click", () => {
       scenarioMode = b.dataset.mode;
-      probaWindow = []; lastLibrarySwitch = ""; lastScenarioAction = 0;
+      probaWindow = []; lastScenarioAction = 0;
+      playCue("mode");
       overlayEl.querySelectorAll("#bci-mode-seg .bci-seg-btn")
         .forEach((x) => x.classList.toggle("bci-seg-on", x === b));
       const st = document.getElementById("bci-scenario-status");
-      st.textContent = scenarioMode === "off" ? "關閉"
-        : scenarioMode === "filter" ? "過濾模式啟動" : "歌單庫模式啟動";
+      st.textContent = scenarioMode === "off" ? "關閉" : "過濾模式啟動";
     });
   });
   // 目標狀態切換
@@ -185,15 +196,11 @@ function buildOverlay() {
     b.addEventListener("click", () => {
       targetState = b.dataset.target;
       probaWindow = [];
+      playCue("mode");
       overlayEl.querySelectorAll("#bci-target-seg .bci-seg-btn")
         .forEach((x) => x.classList.toggle("bci-seg-on", x === b));
     });
   });
-  // 手動切歌單按鈕
-  overlayEl.querySelectorAll(".bci-manual-btn").forEach((b) => {
-    b.addEventListener("click", () => switchToPlaylist(b.dataset.pl));
-  });
-
   toastEl = document.createElement("div");
   toastEl.id = "bci-toast";
   document.body.appendChild(toastEl);
@@ -214,7 +221,10 @@ function connect() {
     reconnectTimer = setTimeout(connect, 3000);
     return;
   }
-  ws.onopen    = () => setStatus(true, "已連線");
+  ws.onopen    = () => {
+    setStatus(true, "已連線");
+    sendTrackUpdate(true);
+  };
   ws.onmessage = (e) => {
     try { handleMessage(JSON.parse(e.data)); }
     catch (err) { console.warn("[BCI] 解析訊息失敗", err); }
@@ -235,6 +245,59 @@ function setStatus(on, text) {
   txt.textContent = text;
 }
 
+function setOverlayCollapsed(collapsed) {
+  overlayCollapsed = collapsed;
+  localStorage.setItem("bciOverlayCollapsed", collapsed ? "1" : "0");
+  overlayEl?.classList.toggle("bci-collapsed", collapsed);
+  const btn = document.getElementById("bci-collapse-btn");
+  if (btn) {
+    btn.textContent = collapsed ? "+" : "−";
+    btn.title = collapsed ? "展開 BCI 面板" : "收合 BCI 面板";
+  }
+}
+
+function readText(selectors) {
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    const text = el?.textContent?.trim();
+    if (text) return text.replace(/\s+/g, " ");
+  }
+  return "";
+}
+
+function getCurrentTrackInfo() {
+  const title = readText([
+    "ytmusic-player-bar .title",
+    ".title.ytmusic-player-bar",
+    "yt-formatted-string.title",
+  ]);
+  const byline = readText([
+    "ytmusic-player-bar .byline",
+    ".byline.ytmusic-player-bar",
+    "yt-formatted-string.byline",
+    "ytmusic-player-bar .subtitle",
+  ]);
+  const parts = byline.split(/[•·]/).map((x) => x.trim()).filter(Boolean);
+  const playButton = document.querySelector("#play-pause-button, .play-pause-button.ytmusic-player-bar");
+  const label = `${playButton?.getAttribute("aria-label") || ""} ${playButton?.getAttribute("title") || ""}`;
+  return {
+    title,
+    artist: parts[0] || byline,
+    album: parts.slice(1).join(" • "),
+    playing: /pause|暫停/i.test(label) || !/play|播放/i.test(label),
+  };
+}
+
+function sendTrackUpdate(force) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const track = getCurrentTrackInfo();
+  if (!track.title) return;
+  const key = `${track.title}|${track.artist}|${track.album}|${track.playing}`;
+  if (!force && key === lastTrackKey) return;
+  lastTrackKey = key;
+  ws.send(JSON.stringify({ type: "track_update", ...track }));
+}
+
 function handleMessage(msg) {
   if (!msg || !msg.type) return;
   if (msg.type === "proba")  updateProba(msg);
@@ -245,7 +308,9 @@ function handleMessage(msg) {
       buckets = msg.buckets;
       updateBucketLabels();
     }
+    if (msg.calibration) handleCalibration(msg.calibration);
   }
+  if (msg.type === "calibration") handleCalibration(msg);
   if (msg.type === "llm_status") setLlmAvailable(msg.available);
   if (msg.type === "llm_insight") showInsight(msg.text);
   if (msg.type === "llm_report") showReportModal(msg);
@@ -259,6 +324,56 @@ function setLlmAvailable(available) {
   if (insightEl && !available) {
     insightEl.textContent = "AI 教練未啟用（後端未設 OPENAI_API_KEY）";
     insightEl.classList.add("bci-ai-off");
+  }
+}
+
+function handleCalibration(msg) {
+  const box = document.getElementById("bci-calibration");
+  const text = document.getElementById("bci-cal-text");
+  const fill = document.getElementById("bci-cal-fill");
+  if (!box || !text || !fill) return;
+
+  if ((msg.state === "noise" || msg.state === "blink") && "remaining" in msg) {
+    isCalibrating = true;
+    box.style.display = "block";
+    const duration = msg.duration || 5;
+    const remaining = Math.max(0, msg.remaining || 0);
+    const pct = Math.max(0, Math.min(100, ((duration - remaining) / duration) * 100));
+    text.textContent = msg.message || (msg.state === "noise"
+      ? `保持穩定、不眨眼，剩下 ${remaining.toFixed(1)}s`
+      : `連續快速眨眼，剩下 ${remaining.toFixed(1)}s`);
+    fill.style.width = `${pct.toFixed(0)}%`;
+    return;
+  }
+
+  if (msg.state === "queued") {
+    isCalibrating = true;
+    box.style.display = "block";
+    text.textContent = msg.message || "校正即將開始";
+    fill.style.width = "0%";
+  } else if (msg.state === "start" || msg.state === "noise" || msg.state === "blink") {
+    isCalibrating = true;
+    box.style.display = "block";
+    text.textContent = msg.message || "請連續快速眨眼 5 秒";
+    fill.style.width = "0%";
+    playCue("calibration");
+  } else if (msg.state === "running") {
+    isCalibrating = true;
+    box.style.display = "block";
+    const duration = msg.duration || 5;
+    const remaining = Math.max(0, msg.remaining || 0);
+    const pct = Math.max(0, Math.min(100, ((duration - remaining) / duration) * 100));
+    text.textContent = `請連續快速眨眼，剩下 ${remaining.toFixed(1)}s`;
+    fill.style.width = `${pct.toFixed(0)}%`;
+  } else if (msg.state === "done") {
+    isCalibrating = false;
+    box.style.display = "block";
+    text.textContent = msg.message || "校正完成，可以開始控制";
+    fill.style.width = "100%";
+    playCue("done");
+    setTimeout(() => {
+      if (!isCalibrating) box.style.display = "none";
+    }, 2200);
   }
 }
 
@@ -300,6 +415,7 @@ function showReportModal(msg) {
         </div>
         <div class="bci-report-row"><b>總結</b>${msg.summary || ""}</div>
         <div class="bci-report-row"><b>觀察</b>${msg.observation || ""}</div>
+        <div class="bci-report-row"><b>音樂</b>${msg.music_observation || "本次歌曲資料不足，先多聽幾首再分析。"}</div>
         <div class="bci-report-row bci-report-sug"><b>建議</b>${msg.suggestion || ""}</div>
         <div class="bci-report-meta">
           時長 ${s.duration_min ?? "?"} 分 ·
@@ -322,9 +438,13 @@ function updateBucketLabels() {
 
 function updateProba(msg) {
   if (!overlayEl) return;
+  if (msg.calibrating) isCalibrating = true;
   const bars = overlayEl.querySelectorAll(".bci-bar-fill");
   const pcts = overlayEl.querySelectorAll(".bci-bar-pct");
-  const vals = [msg.relax, msg.focus, msg.blink];
+  const blinkDisplay = msg.control_mode === "raw"
+    ? Math.min((msg.raw_p2p || 0) / (msg.raw_p2p_thresh || 200), 1)
+    : msg.blink;
+  const vals = [msg.relax, msg.focus, blinkDisplay];
   vals.forEach((v, i) => {
     bars[i].style.width = `${(v * 100).toFixed(0)}%`;
     pcts[i].textContent = `${(v * 100).toFixed(0)}%`;
@@ -363,9 +483,10 @@ function updateProba(msg) {
   evaluateScenario(msg);
 }
 
-// ── 情境式歌單切換邏輯 ──────────────────────────────────────
+// ── 混合歌單過濾邏輯 ──────────────────────────────────────
 function evaluateScenario(msg) {
   if (scenarioMode === "off") return;
+  if (msg.calibrating || isCalibrating) return;
   // 眨眼當下不納入狀態判斷（眨眼會污染 Focus/Relax 判讀）
   if (msg.is_blinking) return;
 
@@ -380,60 +501,28 @@ function evaluateScenario(msg) {
     return;
   }
 
-  if (scenarioMode === "filter") {
-    const winMs = SCENARIO.mismatchSec * 1000;
-    const recent = probaWindow.filter((s) => now - s.t <= winMs);
-    if (recent.length < 4 || (now - recent[0].t) < winMs * 0.8) {
-      if (statusEl) statusEl.textContent = "觀察中…";
-      return;
-    }
-    const avgTarget = recent.reduce((a, s) => a + s[targetState], 0) / recent.length;
-    const tName = targetState === "focus" ? "專注" : "放鬆";
-    if (avgTarget < 0.4) {
-      doAction("next");
-      showToast(`🎯 這首沒讓你${tName} → 跳下一首`);
-      pushEvent(`過濾跳歌`, `${(avgTarget*100).toFixed(0)}%`);
-      lastScenarioAction = now;
-      probaWindow = [];
-      if (statusEl) statusEl.textContent = `已跳歌（${tName}度 ${(avgTarget*100).toFixed(0)}%）`;
-    } else if (statusEl) {
-      statusEl.textContent = `${tName}度 ${(avgTarget*100).toFixed(0)}%（保留）`;
-    }
-  } else if (scenarioMode === "library") {
-    const winMs = SCENARIO.switchSec * 1000;
-    const recent = probaWindow.filter((s) => now - s.t <= winMs);
-    if (recent.length < 6 || (now - recent[0].t) < winMs * 0.8) {
-      if (statusEl) statusEl.textContent = "判讀情境中…";
-      return;
-    }
-    const avgFocus = recent.reduce((a, s) => a + s.focus, 0) / recent.length;
-    const avgRelax = recent.reduce((a, s) => a + s.relax, 0) / recent.length;
-    let detected = null;
-    if (avgFocus > 0.55) detected = "focus";
-    else if (avgRelax > 0.55) detected = "relax";
-    if (detected && detected !== lastLibrarySwitch) {
-      switchToPlaylist(detected);
-      lastLibrarySwitch = detected;
-      lastScenarioAction = now;
-      probaWindow = [];
-    } else if (statusEl) {
-      const dn = detected === "focus" ? "專注" : detected === "relax" ? "放鬆" : "判讀中";
-      statusEl.textContent = `情境：${dn}`;
-    }
-  }
-}
-
-function switchToPlaylist(state) {
-  const list = PLAYLISTS[state] || [];
-  const name = state === "focus" ? "專注" : "放鬆";
-  if (list.length === 0) {
-    showToast(`⚠ 沒設定${name}歌單（content.js PLAYLISTS）`);
+  const winMs = SCENARIO.mismatchSec * 1000;
+  const recent = probaWindow.filter((s) => now - s.t <= winMs);
+  if (recent.length < 4 || (now - recent[0].t) < winMs * 0.8) {
+    if (statusEl) statusEl.textContent = "觀察中…";
     return;
   }
-  const url = list[Math.floor(Math.random() * list.length)];
-  showToast(`🎵 切換${name}歌單`);
-  pushEvent(`切${name}歌單`, "");
-  window.location.href = url;  // 同分頁導航，會自動開始播放
+  const badCount = recent.filter((s) => s[targetState] < SCENARIO.targetFloor).length;
+  const mismatchRatio = badCount / recent.length;
+  const avgTarget = recent.reduce((a, s) => a + s[targetState], 0) / recent.length;
+  const tName = targetState === "focus" ? "專注" : "放鬆";
+  if (mismatchRatio >= SCENARIO.mismatchRatio) {
+    doAction("next");
+    showToast(`這首未達${tName}目標，跳下一首`);
+    pushEvent(`過濾跳歌`, `不符${(mismatchRatio*100).toFixed(0)}%`);
+    lastScenarioAction = now;
+    probaWindow = [];
+    if (statusEl) {
+      statusEl.textContent = `已跳歌（不符 ${(mismatchRatio*100).toFixed(0)}%，${tName}均值 ${(avgTarget*100).toFixed(0)}%）`;
+    }
+  } else if (statusEl) {
+    statusEl.textContent = `${tName}均值 ${(avgTarget*100).toFixed(0)}%，不符 ${(mismatchRatio*100).toFixed(0)}%（保留）`;
+  }
 }
 
 function doAction(action, holdDuration) {
@@ -459,11 +548,46 @@ function doAction(action, holdDuration) {
   const niceName = ACTION_NAMES[action] || action;
   const dStr = holdDuration ? `${holdDuration.toFixed(1)}s` : "";
   if (clicked) {
+    playCue(action);
     showToast(`✓ ${niceName}（${dStr}）`);
     pushEvent(niceName, dStr);
+    setTimeout(() => sendTrackUpdate(true), 1200);
   } else {
+    playCue("error");
     showToast(`✗ 找不到 ${niceName} 按鈕`);
     console.warn("[BCI] 找不到按鈕", action, list);
+  }
+}
+
+function playCue(kind) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const now = audioCtx.currentTime;
+    const seq = {
+      play_pause: [[220, 0.00, 0.10], [330, 0.10, 0.12]],
+      next: [[520, 0.00, 0.08], [780, 0.08, 0.10]],
+      prev: [[780, 0.00, 0.08], [520, 0.08, 0.10]],
+      mode: [[440, 0.00, 0.07]],
+      calibration: [[330, 0.00, 0.08], [440, 0.10, 0.08]],
+      done: [[440, 0.00, 0.08], [660, 0.09, 0.10], [880, 0.20, 0.10]],
+      error: [[180, 0.00, 0.16]],
+    }[kind] || [[440, 0.00, 0.08]];
+
+    seq.forEach(([freq, offset, dur]) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.08, now + offset + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + dur);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(now + offset);
+      osc.stop(now + offset + dur + 0.02);
+    });
+  } catch (err) {
+    console.debug("[BCI] audio cue unavailable", err);
   }
 }
 

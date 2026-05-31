@@ -17,11 +17,16 @@
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: opacity 0.2s;
+  transition: opacity 0.2s, width 0.2s, padding 0.2s;
 }
 
 #bci-overlay.bci-paused {
   opacity: 0.45;
+}
+
+#bci-overlay.bci-collapsed {
+  width: 190px;
+  padding: 8px 10px;
 }
 
 #bci-overlay header {
@@ -35,6 +40,19 @@
   text-transform: uppercase;
 }
 
+#bci-overlay.bci-collapsed header {
+  margin-bottom: 0;
+}
+
+#bci-overlay.bci-collapsed > :not(header) {
+  display: none !important;
+}
+
+#bci-overlay .bci-title {
+  flex: 1;
+  min-width: 0;
+}
+
 #bci-overlay .bci-status {
   display: flex;
   align-items: center;
@@ -43,6 +61,30 @@
   text-transform: none;
   font-size: 11px;
   color: #bbb;
+  margin-left: 8px;
+  min-width: 0;
+}
+
+#bci-overlay .bci-status-text {
+  white-space: nowrap;
+}
+
+#bci-overlay .bci-collapse-btn {
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ddd;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#bci-overlay .bci-collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }
 
 #bci-overlay .bci-led {
@@ -93,6 +135,38 @@
 }
 
 /* ── 連續眨眼時長 + bucket bar ───────────────────────────── */
+#bci-overlay .bci-calibration {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(30, 215, 96, 0.10);
+  border: 1px solid rgba(30, 215, 96, 0.30);
+  border-radius: 8px;
+}
+#bci-overlay .bci-cal-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1ed760;
+  margin-bottom: 4px;
+}
+#bci-overlay .bci-cal-text {
+  font-size: 11px;
+  color: #ddd;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+#bci-overlay .bci-cal-track {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 999px;
+  overflow: hidden;
+}
+#bci-overlay .bci-cal-fill {
+  height: 100%;
+  width: 0%;
+  background: #1ed760;
+  transition: width 0.2s linear;
+}
+
 #bci-overlay .bci-hold-section {
   margin-top: 12px;
   padding: 10px;
@@ -104,6 +178,21 @@
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+#bci-overlay .bci-calibrate-btn {
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 5px 0;
+  border-radius: 6px;
+  border: 1px solid rgba(30, 215, 96, 0.35);
+  background: rgba(30, 215, 96, 0.08);
+  color: #1ed760;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#bci-overlay .bci-calibrate-btn:hover {
+  background: rgba(30, 215, 96, 0.16);
 }
 #bci-overlay .bci-label {
   font-size: 11px;
@@ -269,24 +358,6 @@
   color: #fff;
   border-color: #4a90e2;
 }
-#bci-overlay .bci-scenario-manual {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-}
-#bci-overlay .bci-manual-btn {
-  flex: 1;
-  background: transparent;
-  color: #5fa8ff;
-  border: 1px dashed rgba(95, 168, 255, 0.4);
-  border-radius: 6px;
-  padding: 5px 0;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-#bci-overlay .bci-manual-btn:hover { background: rgba(95, 168, 255, 0.12); }
-
 /* ── AI 教練面板 ─────────────────────────────────────────── */
 #bci-overlay .bci-ai-section {
   margin-top: 10px;

@@ -80,8 +80,9 @@ async def report(session_stats: dict) -> dict | None:
     session_stats 例：
       {"duration_min": 12.5, "relax_pct": .., "focus_pct": .., "blink_pct": ..,
        "timeline": [{"min":0,"dominant":"Focus"},...],
+       "music": [{"title":..., "artist":..., "focus_pct":..., "relax_pct":..., "web":...}, ...],
        "n_play_pause":2, "n_next":3, "n_prev":1}
-    回傳 dict：{"summary":..., "observation":..., "suggestion":..., "focus_score":int}
+    回傳 dict：{"summary":..., "observation":..., "music_observation":..., "suggestion":..., "focus_score":int}
     失敗回 None。
     """
     client = _get_client()
@@ -92,7 +93,8 @@ async def report(session_stats: dict) -> dict | None:
         "輸出 JSON（繁體中文），欄位：\n"
         '  "summary": 一句總結這次表現,\n'
         '  "observation": 一句具體觀察（哪段專注度高/低、跳歌頻率等）,\n'
-        '  "suggestion": 一句下次的具體建議（含音樂類型方向）,\n'
+        '  "music_observation": 2句，根據 music 欄位的 EEG 平均值與 web.sources/web.terms，具體比較哪些歌曲、歌手或音樂特徵較偏專注/放鬆；若 web.status 不是 ok 或資料不足請明說,\n'
+        '  "suggestion": 一句下次的具體建議（含可嘗試的音樂特徵如曲風、節奏、人聲/純音樂，但不要宣稱因果）,\n'
         '  "focus_score": 0-100 整數專注度評分\n'
         "只輸出 JSON，不要其他文字。\n\n"
         f"資料：{json.dumps(session_stats, ensure_ascii=False)}"
@@ -101,7 +103,7 @@ async def report(session_stats: dict) -> dict | None:
         resp = await client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=400,
+            max_tokens=700,
             temperature=0.6,
             response_format={"type": "json_object"},
         )
