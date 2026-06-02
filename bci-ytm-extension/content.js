@@ -576,18 +576,15 @@ function doAction(action, holdDuration) {
       (action === "next" && (/play|pause/.test(lbl) || ARIA.prev.test(lbl)));
     if (wrong) {
       console.warn("[BCI] 防呆攔截：", action, "抓到的元素 aria-label=", lbl, "→ 不點擊");
+    } else if (action === "prev") {
+      // YT Music 的「上一首」：第一次通常只是把當前曲目跳回開頭，
+      // 要再按一次才會真的切到前一首。改用「比對歌名」可靠判斷：
+      // 點一次 → 等 450ms 看歌名變了沒 → 沒變就再點一次（最多補 2 次）。
+      clicked = action;
+      goPrevReliable(el);
     } else {
       el.click();
       clicked = action;
-      // YT Music 的「上一首」：第一次只是把當前曲目跳回開頭，
-      // 要再按一次才會真的切到前一首。若歌剛開始播(<3s)第一次就會跳，
-      // 此時不補第二次以免跳過頭。
-      if (action === "prev") {
-        const cur = getCurrentTimeSec();   // 取當前播放秒數，取不到回 null
-        if (cur === null || cur >= 3) {
-          setTimeout(() => { try { el.click(); } catch (_) {} }, 350);
-        }
-      }
     }
   }
   const niceName = ACTION_NAMES[action] || action;
@@ -609,6 +606,31 @@ function getCurrentTimeSec() {
   const v = document.querySelector("video");
   if (v && Number.isFinite(v.currentTime)) return v.currentTime;
   return null;
+}
+
+// 可靠地切到上一首：YT Music 第一次按 prev 常只是把當前曲目跳回開頭，
+// 要再按才會真的換歌。策略：點一下 → 等 450ms 比對歌名，沒變就重點，
+// 最多點 MAX_CLICKS 次（涵蓋「重播→換歌」需要兩下、偶爾需三下的情況）。
+function goPrevReliable(initialBtn) {
+  const before = getCurrentTrackInfo().title;
+  const MAX_CLICKS = 3;
+
+  function findPrevBtn() {
+    return document.querySelector(
+      "ytmusic-player-bar .previous-button, .previous-button.ytmusic-player-bar"
+    ) || initialBtn;
+  }
+
+  function attempt(n) {
+    const btn = findPrevBtn();
+    try { btn.click(); } catch (_) {}
+    setTimeout(() => {
+      const nowTitle = getCurrentTrackInfo().title;
+      if (nowTitle && nowTitle !== before) return;   // 換歌成功
+      if (n + 1 < MAX_CLICKS) attempt(n + 1);         // 還沒換 → 再點
+    }, 450);
+  }
+  attempt(0);
 }
 
 function playCue(kind) {
