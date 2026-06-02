@@ -530,20 +530,56 @@ function doAction(action, holdDuration) {
     showToast(`已停用 → 略過 ${ACTION_NAMES[action] || action}`);
     return;
   }
-  const selectors = {
-    play_pause: ['#play-pause-button', 'tp-yt-paper-icon-button.play-pause-button',
-                 '.play-pause-button.ytmusic-player-bar'],
-    next:       ['.next-button.ytmusic-player-bar', 'tp-yt-paper-icon-button.next-button',
-                 'yt-button-shape[aria-label*="Next" i] button'],
-    prev:       ['.previous-button.ytmusic-player-bar', 'tp-yt-paper-icon-button.previous-button',
-                 'yt-button-shape[aria-label*="Previous" i] button'],
+  // 只在 YT Music 底部播放列(.ytmusic-player-bar)範圍內找按鈕，
+  // 避免抓到頁面其他地方的同名元素。每個動作用「class + aria-label」雙重定位，
+  // 並驗證抓到的不是別的鈕（修 prev 誤觸 play/pause）。
+  const playerBar = document.querySelector("ytmusic-player-bar") || document;
+
+  // aria-label 關鍵字（YT Music 各語系皆含這些英文片段；中文介面通常仍保留英文 aria）
+  const ARIA = {
+    play_pause: /play|pause|播放|暫停/i,
+    next:       /next/i,
+    prev:       /previous|prev/i,
   };
-  const list = selectors[action];
-  if (!list) return;
+  // 明確的 class（最優先），抓不到再退回 aria-label
+  const CLASS = {
+    play_pause: "#play-pause-button, .play-pause-button",
+    next:       ".next-button",
+    prev:       ".previous-button",
+  };
+
+  function findButton(act) {
+    // 1) 先試明確 class（限定在播放列內）
+    const byClass = playerBar.querySelector(CLASS[act]);
+    if (byClass) return byClass;
+    // 2) 退回 aria-label：掃播放列內所有按鈕，比對 aria-label
+    const btns = playerBar.querySelectorAll(
+      'button, tp-yt-paper-icon-button, yt-button-shape, [role="button"]');
+    for (const b of btns) {
+      const label = (b.getAttribute("aria-label") || b.getAttribute("title") || "").trim();
+      if (!label) continue;
+      // prev 一定要先排除 next（"Next" 不含 "previous"，但保險起見嚴格比對）
+      if (act === "prev" && ARIA.prev.test(label) && !ARIA.next.test(label)) return b;
+      if (act === "next" && ARIA.next.test(label) && !ARIA.prev.test(label)) return b;
+      if (act === "play_pause" && ARIA.play_pause.test(label)) return b;
+    }
+    return null;
+  }
+
+  const el = findButton(action);
   let clicked = null;
-  for (const sel of list) {
-    const el = document.querySelector(sel);
-    if (el) { el.click(); clicked = sel; break; }
+  if (el) {
+    // 防呆：確認抓到的元素 aria-label 不是別的動作（特別擋 prev→play/pause）
+    const lbl = (el.getAttribute("aria-label") || el.getAttribute("title") || "").toLowerCase();
+    const wrong =
+      (action === "prev" && (/play|pause/.test(lbl) || ARIA.next.test(lbl))) ||
+      (action === "next" && (/play|pause/.test(lbl) || ARIA.prev.test(lbl)));
+    if (wrong) {
+      console.warn("[BCI] 防呆攔截：", action, "抓到的元素 aria-label=", lbl, "→ 不點擊");
+    } else {
+      el.click();
+      clicked = action;
+    }
   }
   const niceName = ACTION_NAMES[action] || action;
   const dStr = holdDuration ? `${holdDuration.toFixed(1)}s` : "";
@@ -555,7 +591,7 @@ function doAction(action, holdDuration) {
   } else {
     playCue("error");
     showToast(`✗ 找不到 ${niceName} 按鈕`);
-    console.warn("[BCI] 找不到按鈕", action, list);
+    console.warn("[BCI] 找不到按鈕", action);
   }
 }
 
