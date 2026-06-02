@@ -491,6 +491,7 @@ async def infer_loop(args):
     # Hysteresis state machine
     is_blinking = False
     blink_start_t = None
+    blink_last_active_t = None   # 最後一次 blink_p 仍 >= enter 的時刻（真正眨眼結束點）
     last_pred_t = 0.0
     last_action_t = 0.0
     last_insight_t = 0.0
@@ -682,8 +683,14 @@ async def infer_loop(args):
                 fired_action = None
                 fired_duration = None
                 if args.control_mode == "model" and is_blinking:
+                    # 持續追蹤「最後一次仍在眨眼」的時刻，作為真正的眨眼結束點
+                    if blink_p >= args.enter_thresh:
+                        blink_last_active_t = now
                     if blink_p < args.exit_thresh:
-                        duration = now - blink_start_t
+                        # 用 last_active 而非 exit 偵測點計時，扣掉平滑造成的尾巴延遲
+                        # → 與綠色進度條停止時顯示的秒數一致
+                        end_t = blink_last_active_t if blink_last_active_t is not None else now
+                        duration = max(0.0, end_t - blink_start_t)
                         action = action_for_duration(
                             duration, args.bucket_1, args.bucket_2,
                             args.bucket_3, args.bucket_max)
@@ -702,10 +709,12 @@ async def infer_loop(args):
                             print(f"  ↪ 連續眨眼 {duration:.2f}s → 忽略（動作冷卻中）")
                         is_blinking = False
                         blink_start_t = None
+                        blink_last_active_t = None
                 elif args.control_mode == "model":
                     if blink_p >= args.enter_thresh:
                         is_blinking = True
                         blink_start_t = now
+                        blink_last_active_t = now
                         print(f"  · 進入連續眨眼狀態（B={blink_p:.2f}）")
 
                 # Hold duration（仍在連續眨眼狀態時即時更新）
@@ -732,7 +741,13 @@ async def infer_loop(args):
                     hold_duration = raw_detector.hold_duration(now)
                 else:
                     control_is_blinking = is_blinking
-                    hold_duration = (now - blink_start_t) if is_blinking else 0.0
+                    if is_blinking:
+                        # 綠色進度條用「最後仍在眨眼」的時刻計時，與最終判定一致；
+                        # blink_p 已掉到 enter 以下（平滑尾巴）時凍結，不再往前長
+                        end_t = blink_last_active_t if blink_last_active_t is not None else now
+                        hold_duration = max(0.0, end_t - blink_start_t)
+                    else:
+                        hold_duration = 0.0
 
                 # 廣播
                 msg = {
