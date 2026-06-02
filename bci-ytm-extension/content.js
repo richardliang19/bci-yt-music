@@ -579,6 +579,15 @@ function doAction(action, holdDuration) {
     } else {
       el.click();
       clicked = action;
+      // YT Music 的「上一首」：第一次只是把當前曲目跳回開頭，
+      // 要再按一次才會真的切到前一首。若歌剛開始播(<3s)第一次就會跳，
+      // 此時不補第二次以免跳過頭。
+      if (action === "prev") {
+        const cur = getCurrentTimeSec();   // 取當前播放秒數，取不到回 null
+        if (cur === null || cur >= 3) {
+          setTimeout(() => { try { el.click(); } catch (_) {} }, 350);
+        }
+      }
     }
   }
   const niceName = ACTION_NAMES[action] || action;
@@ -593,6 +602,13 @@ function doAction(action, holdDuration) {
     showToast(`✗ 找不到 ${niceName} 按鈕`);
     console.warn("[BCI] 找不到按鈕", action);
   }
+}
+
+// 取得目前曲目已播放秒數；用 YT Music 內嵌的 <video> 最準，取不到回 null
+function getCurrentTimeSec() {
+  const v = document.querySelector("video");
+  if (v && Number.isFinite(v.currentTime)) return v.currentTime;
+  return null;
 }
 
 function playCue(kind) {
