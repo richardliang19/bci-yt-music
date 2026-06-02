@@ -4,7 +4,7 @@
 // 2. 注入浮動 overlay 顯示機率條 + 連續眨眼持續時間
 // 3. 收到 action → 直接 click YT Music 頁面播放鈕
 // 動作對應（依「連續快速眨眼」的持續時間）：
-//   <2s = 忽略   2-4s = 播放/暫停   4-6.5s = 下一首   6.5-9s = 上一首
+//   <2s = 忽略   2-4s = 播放/暫停   4-6.5s = 下一首   6.5-9s = 重播本曲
 //
 // 混合歌單過濾：一段時間內多數樣本偏離目標狀態(專注/放鬆) → 自動跳下一首
 // ──────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ let buckets = [2.0, 4.0, 6.5, 9.0];
 const ACTION_NAMES = {
   play_pause: "播放/暫停",
   next:       "下一首",
-  prev:       "上一首",
+  prev:       "重播本曲",
 };
 
 chrome.storage.local.get(DEFAULT_CONFIG, (loaded) => {
@@ -117,7 +117,7 @@ function buildOverlay() {
         <div class="bci-bucket bci-bucket-ignore" data-bucket="0"><span>忽略</span></div>
         <div class="bci-bucket bci-bucket-pp"     data-bucket="1"><span>▶❚❚</span></div>
         <div class="bci-bucket bci-bucket-next"   data-bucket="2"><span>⏭</span></div>
-        <div class="bci-bucket bci-bucket-prev"   data-bucket="3"><span>⏮</span></div>
+        <div class="bci-bucket bci-bucket-prev"   data-bucket="3"><span>🔁</span></div>
         <div class="bci-bucket bci-bucket-ignore" data-bucket="4"><span>忽略</span></div>
         <div class="bci-bucket-marker" id="bci-bucket-marker"></div>
       </div>
@@ -420,7 +420,7 @@ function showReportModal(msg) {
         <div class="bci-report-meta">
           時長 ${s.duration_min ?? "?"} 分 ·
           Focus ${Math.round((s.focus_pct ?? 0)*100)}% ·
-          操作 ▶${s.n_play_pause ?? 0} ⏭${s.n_next ?? 0} ⏮${s.n_prev ?? 0}
+          操作 ▶${s.n_play_pause ?? 0} ⏭${s.n_next ?? 0} 🔁${s.n_prev ?? 0}
         </div>
       </div>`;
   }
@@ -576,13 +576,9 @@ function doAction(action, holdDuration) {
       (action === "next" && (/play|pause/.test(lbl) || ARIA.prev.test(lbl)));
     if (wrong) {
       console.warn("[BCI] 防呆攔截：", action, "抓到的元素 aria-label=", lbl, "→ 不點擊");
-    } else if (action === "prev") {
-      // YT Music 的「上一首」：第一次通常只是把當前曲目跳回開頭，
-      // 要再按一次才會真的切到前一首。改用「比對歌名」可靠判斷：
-      // 點一次 → 等 450ms 看歌名變了沒 → 沒變就再點一次（最多補 2 次）。
-      clicked = action;
-      goPrevReliable(el);
     } else {
+      // prev = 重播本曲：YT Music 按一次上一首鈕會把當前曲目跳回開頭，
+      // 正好就是「重播」效果（無法可靠跳到真正的上一首，故定位為重播）。
       el.click();
       clicked = action;
     }
@@ -599,38 +595,6 @@ function doAction(action, holdDuration) {
     showToast(`✗ 找不到 ${niceName} 按鈕`);
     console.warn("[BCI] 找不到按鈕", action);
   }
-}
-
-// 取得目前曲目已播放秒數；用 YT Music 內嵌的 <video> 最準，取不到回 null
-function getCurrentTimeSec() {
-  const v = document.querySelector("video");
-  if (v && Number.isFinite(v.currentTime)) return v.currentTime;
-  return null;
-}
-
-// 可靠地切到上一首：YT Music 第一次按 prev 常只是把當前曲目跳回開頭，
-// 要再按才會真的換歌。策略：點一下 → 等 450ms 比對歌名，沒變就重點，
-// 最多點 MAX_CLICKS 次（涵蓋「重播→換歌」需要兩下、偶爾需三下的情況）。
-function goPrevReliable(initialBtn) {
-  const before = getCurrentTrackInfo().title;
-  const MAX_CLICKS = 3;
-
-  function findPrevBtn() {
-    return document.querySelector(
-      "ytmusic-player-bar .previous-button, .previous-button.ytmusic-player-bar"
-    ) || initialBtn;
-  }
-
-  function attempt(n) {
-    const btn = findPrevBtn();
-    try { btn.click(); } catch (_) {}
-    setTimeout(() => {
-      const nowTitle = getCurrentTrackInfo().title;
-      if (nowTitle && nowTitle !== before) return;   // 換歌成功
-      if (n + 1 < MAX_CLICKS) attempt(n + 1);         // 還沒換 → 再點
-    }, 450);
-  }
-  attempt(0);
 }
 
 function playCue(kind) {
